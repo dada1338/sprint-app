@@ -212,6 +212,39 @@ dialog .db{padding:16px}
 
 <!-- ===================== MODÈLE ===================== -->
 <section class="view" id="view-model" hidden>
+  <div class="seg" id="modelMode" style="margin-bottom:14px">
+    <button data-mode="pred" aria-pressed="true">Prédire un temps</button>
+    <button data-mode="target" aria-pressed="false">Objectif → vitesse requise</button>
+  </div>
+  <div id="modePred">
+  <div class="card">
+    <h2>Prédicteur 100 m</h2>
+    <div class="grid2">
+      <label>À partir de<select id="pSrc"><option value="sess">Une séance enregistrée</option><option value="v">Une vitesse max (m/s)</option><option value="fly">Un temps sur 10 m lancé (s)</option></select></label>
+      <label class="p-sess">Séance<select id="pSess"></select></label>
+      <label class="p-v" hidden>Vitesse max atteinte (m/s)<input type="text" inputmode="decimal" id="pV" value="10,50"></label>
+      <label class="p-fly" hidden>Temps sur 10 m lancé (s)<input type="text" inputmode="decimal" id="pFly" value="0,95"></label>
+      <label class="p-tau" hidden>Constante d'accélération τ : <output id="pTauOut"></output><input type="range" id="pTau" min="0.8" max="1.8" step="0.01" value="1.20"></label>
+      <label>Temps de réaction (s)<input type="text" inputmode="decimal" id="pRt" value="0,15"></label>
+      <label>Perte de vitesse en fin de course : <output id="pDecOut"></output><input type="range" id="pDec" min="0" max="12" step="0.5" value="4"></label>
+    </div>
+    <p class="muted small" id="pSrcNote" style="margin:10px 0 0"></p>
+  </div>
+  <div class="card">
+    <p class="hero" id="pHero"></p>
+    <div class="kpis" id="pKpis"></div>
+    <div id="pChart"></div>
+    <p class="muted small" style="margin:6px 0 0">Course prédite : vitesse en fonction de la distance.</p>
+    <h3>Prochain palier</h3>
+    <p id="pNext" style="margin:0"></p>
+  </div>
+  <div class="card">
+    <h2>Prédictions de l'équipe</h2>
+    <p class="muted small" style="margin-top:-6px">Meilleure séance de chaque athlète, avec les réglages de réaction et de perte de vitesse ci-dessus. Touchez une ligne pour l'ouvrir dans le prédicteur.</p>
+    <div class="tablewrap"><table id="pTeam"></table></div>
+  </div>
+  </div>
+  <div id="modeTarget" hidden>
   <div class="card">
     <h2>Course modèle 100 m</h2>
     <div class="grid2">
@@ -229,6 +262,7 @@ dialog .db{padding:16px}
     <p class="muted small" style="margin:6px 0 0">Vitesse en fonction de la distance pour l'objectif (trait épais) et les temps voisins.</p>
     <h3>Temps de passage</h3>
     <div class="tablewrap"><table id="mSplits"></table></div>
+  </div>
   </div>
 </section>
 
@@ -534,7 +568,7 @@ function show(v){
   LS.set(KEY + '.tab', v);
   if (v === 'team') renderTeam();
   if (v === 'chrono') renderChrono();
-  if (v === 'model') { fillCompare(); renderModel(); }
+  if (v === 'model') { fillCompare(); fillPredSessions(); renderModel(); renderPred(); }
   if (v === 'video') requestAnimationFrame(resizeOverlay);
   window.scrollTo(0, 0);
 }
@@ -756,6 +790,79 @@ function renderModel(){
 }
 ['#mTarget', '#mRt', '#mTau', '#mDec', '#mCompare'].forEach(s => $(s).addEventListener('input', renderModel));
 $('#mCompare').addEventListener('change', renderModel);
+
+/* ---------- Prédicteur ---------- */
+function setModelMode(m){
+  $$('#modelMode button').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === m));
+  $('#modePred').hidden = m !== 'pred'; $('#modeTarget').hidden = m !== 'target';
+  LS.set(KEY + '.mmode', m);
+}
+$('#modelMode').addEventListener('click', e => { const b = e.target.closest('[data-mode]'); if (b) setModelMode(b.dataset.mode); });
+function fillPredSessions(){
+  const sel = $('#pSess'), cur = sel.value;
+  const ss = db.sessions.filter(s => sessionFit(s)).sort((a, b) => b.date.localeCompare(a.date));
+  sel.innerHTML = ss.map(s => { const a = athlete(s.athleteId); return `<option value="${s.id}">${esc(a ? a.name : '?')} · ${fmtDate(s.date)} · ${esc(s.label || '')}</option>`; }).join('') || '<option value="">— Aucune séance —</option>';
+  if (cur && ss.some(s => s.id === cur)) sel.value = cur;
+  else if (ss.length) sel.value = ss.reduce((b, s) => sessionFit(s).V > sessionFit(b).V ? s : b).id;   // par défaut : la meilleure Vmax
+}
+function raceAt(pts, d){
+  for (let i = 1; i < pts.length; i++) if (pts[i].d >= d){ const a = pts[i - 1], b = pts[i], u = (d - a.d) / ((b.d - a.d) || 1); return {t: a.t + u * (b.t - a.t), v: a.v + u * (b.v - a.v)}; }
+  return pts[pts.length - 1];
+}
+/* La vitesse max mesurée = pic de vitesse de la course simulée (avec décélération en fin de course). */
+function predictRace(peak, tau, decPct, rt){
+  const k = decelK(decPct); let lo = peak * 0.95, hi = peak * 1.25;
+  for (let i = 0; i < 28; i++){ const m = (lo + hi) / 2; if (M.run(m, tau, k, DECEL_START, (t, d) => d >= 100, 0.004).vmax < peak) lo = m; else hi = m; }
+  const r = M.run((lo + hi) / 2, tau, k, DECEL_START, (t, d) => d >= 100);
+  return {r, t100: raceAt(r.pts, 100).t + rt, at: d => raceAt(r.pts, d).t + rt, finish: r.pts[r.pts.length - 1].v};
+}
+function renderPred(){
+  const src = $('#pSrc').value;
+  $$('.p-sess').forEach(e => { e.hidden = src !== 'sess'; }); $$('.p-v').forEach(e => { e.hidden = src !== 'v'; });
+  $$('.p-fly').forEach(e => { e.hidden = src !== 'fly'; }); $$('.p-tau').forEach(e => { e.hidden = src === 'sess'; });
+  const rt = num($('#pRt').value) || 0, dec = +$('#pDec').value;
+  $('#pTauOut').textContent = fmt(+$('#pTau').value) + ' s'; $('#pDecOut').textContent = fmt(dec, 1) + ' %';
+  let peak = NaN, tau = +$('#pTau').value, note = '', who = '';
+  if (src === 'sess'){
+    const s = db.sessions.find(x => x.id === $('#pSess').value), f = s && sessionFit(s);
+    if (f){ peak = f.V; tau = f.tau; who = (athlete(s.athleteId) || {}).name || '';
+      note = `Profil ajusté sur la séance : Vmax ${fmt(f.V)} m/s, τ ${fmt(f.tau)} s. Une séance courte (30 m) sous-estime souvent la vitesse max, et donc surestime le temps.`; }
+    else note = 'Enregistrez d\'abord une séance avec au moins deux temps de passage (onglet Chrono).';
+  } else if (src === 'v'){ peak = num($('#pV').value); note = 'Vitesse max mesurée au radar, au laser ou sur un lancé. τ règle la qualité de l\'accélération (plus petit = départ plus explosif).'; }
+  else { const t = num($('#pFly').value); peak = t > 0 ? 10 / t : NaN; note = `10 m lancé en ${fmt(t)} s = ${fmt(peak)} m/s de moyenne sur la zone, proche de la vitesse max.`; }
+  $('#pSrcNote').textContent = note;
+  renderPredTeam(rt, dec);
+  if (!(peak > 4 && peak < 13.5)){
+    $('#pHero').textContent = src === 'sess' && !who ? 'Aucune séance exploitable.' : 'Indiquez une vitesse max réaliste (entre 4 et 13,5 m/s).';
+    $('#pKpis').innerHTML = $('#pChart').innerHTML = $('#pNext').innerHTML = ''; return;
+  }
+  const P = predictRace(peak, tau, dec, rt);
+  // fourchette : τ ± 0,1 s et perte de vitesse ± 2 points
+  const alts = [[-0.1, -2], [0.1, 2], [-0.1, 2], [0.1, -2]].map(([dt, dd]) => predictRace(peak, Math.max(0.6, tau + dt), Math.max(0, dec + dd), rt).t100);
+  $('#pHero').innerHTML = `${who ? esc(who) + ' : a' : 'A'}vec une vitesse max de <b>${fmt(peak)} m/s</b>, le 100 m prédit est de <b>${fmt(P.t100)} s</b> <span class="muted">(fourchette ${fmt(Math.min(...alts))} – ${fmt(Math.max(...alts))} s)</span>.`;
+  $('#pKpis').innerHTML = kpi('100 m prédit', fmt(P.t100), 's', true) + kpi('Passage 60 m', fmt(P.at(60)), 's') + kpi('Passage 30 m', fmt(P.at(30)), 's') + kpi('Vitesse à l\'arrivée', fmt(P.finish), 'm/s');
+  $('#pChart').innerHTML = chart({title:'Course prédite', xMax:100, xStep:10, yMax:Math.ceil(peak + 1), xLabel:'distance (m)', yLabel:'vitesse (m/s)', right:54,
+    series:[{pts: P.r.pts.filter((p, i) => i % 3 === 0).map(p => [Math.min(100, p.d), p.v]), color:'var(--accent)', width:3.2, label: fmt(P.t100) + ' s'}]});
+  // prochain palier : le dixième de seconde en dessous
+  const target = Math.floor((P.t100 - 0.02) * 10) / 10, k = decelK(dec);
+  if (target - rt > 5){
+    const Vt = M.solveV(target - rt, tau, k, DECEL_START), need = M.run(Vt, tau, k, DECEL_START, (t, d) => d >= 100).vmax;
+    let lo = 0.5, hi = tau, tauNeed = null;
+    if (predictRace(peak, lo, dec, rt).t100 <= target){ for (let i = 0; i < 22; i++){ const m = (lo + hi) / 2; if (predictRace(peak, m, dec, rt).t100 <= target) lo = m; else hi = m; } tauNeed = lo; }
+    $('#pNext').innerHTML = `Pour passer sous <b>${fmt(target)} s</b>, il faut une vitesse max de <b>${fmt(need)} m/s</b>, soit <b>+${fmt(need - peak)} m/s</b> (+${fmt((need / peak - 1) * 100, 1)} %).` +
+      (tauNeed ? ` Ou, à vitesse max égale, une meilleure accélération : τ de ${fmt(tau)} à <b>${fmt(tauNeed)} s</b>.` : '');
+  } else $('#pNext').innerHTML = '';
+}
+function renderPredTeam(rt, dec){
+  const rows = db.athletes.map(a => { const st = athleteStats(a); if (!st.best) return null; const f = st.best.f, P = predictRace(f.V, f.tau, dec, rt); return {a, s: st.best.s, f, P}; })
+    .filter(Boolean).sort((x, y) => x.P.t100 - y.P.t100);
+  $('#pTeam').innerHTML = rows.length ? `<thead><tr><th></th><th>Athlète</th><th class="r">Vmax</th><th class="r hide-sm">30 m</th><th class="r">60 m</th><th class="r">100 m prédit</th></tr></thead><tbody>` +
+    rows.map((x, i) => `<tr class="click" data-sess="${x.s.id}"><td class="muted">${i + 1}</td><td><b>${esc(x.a.name)}</b></td><td class="r">${fmt(x.f.V)}</td><td class="r hide-sm">${fmt(x.P.at(30))}</td><td class="r">${fmt(x.P.at(60))}</td><td class="r"><b>${fmt(x.P.t100)}</b></td></tr>`).join('') + '</tbody>'
+    : '<tbody><tr><td class="muted">Aucune séance chronométrée.</td></tr></tbody>';
+}
+$('#pTeam').addEventListener('click', e => { const tr = e.target.closest('tr[data-sess]'); if (!tr) return; $('#pSrc').value = 'sess'; $('#pSess').value = tr.dataset.sess; renderPred(); window.scrollTo({top:0, behavior:'smooth'}); });
+['#pSrc', '#pSess', '#pV', '#pFly', '#pTau', '#pRt', '#pDec'].forEach(s => { $(s).addEventListener('input', renderPred); $(s).addEventListener('change', renderPred); });
+setModelMode(LS.get(KEY + '.mmode') === 'target' ? 'target' : 'pred');
 
 /* ============================================================
    VIDÉO — lecture image par image, suivi automatique du squelette
