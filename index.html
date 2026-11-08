@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SprintLab</title>
+<meta name="description" content="Mesurer, analyser et faire progresser la vitesse de vos sprinteurs : chronos, courbes de vitesse, courses modèles et analyse vidéo.">
+<meta name="theme-color" content="#0e1116">
+<style>
+:root{
+  --bg:#f4f5f7; --surface:#ffffff; --surface-2:#eef0f3; --text:#14171c; --muted:#5d6673; --line:#dde1e6;
+  --accent:#0a8f6a; --accent-ink:#ffffff; --accent-soft:#d6f2e7; --series2:#5b5bd6; --series3:#c2410c;
+  --grid:#e8ebef; --danger:#c62828; --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1116; --surface:#161a21; --surface-2:#1f2530; --text:#e8ebef; --muted:#9aa4b2; --line:#2a313c;
+    --accent:#3ddc97; --accent-ink:#05261a; --accent-soft:#12372a; --series2:#9a9bff; --series3:#ff8a4c;
+    --grid:#222932; --danger:#ff6b6b; --shadow:none; color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1116; --surface:#161a21; --surface-2:#1f2530; --text:#e8ebef; --muted:#9aa4b2; --line:#2a313c;
+  --accent:#3ddc97; --accent-ink:#05261a; --accent-soft:#12372a; --series2:#9a9bff; --series3:#ff8a4c;
+  --grid:#222932; --danger:#ff6b6b; --shadow:none; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  padding-bottom:calc(76px + env(safe-area-inset-bottom));-webkit-tap-highlight-color:transparent}
+.num,td,th,output,.kpi b{font-variant-numeric:tabular-nums}
+header.top{display:flex;align-items:center;gap:12px;padding:14px 16px 6px;max-width:960px;margin:0 auto}
+header.top svg{flex:none}
+header.top h1{font-size:20px;margin:0;letter-spacing:-.01em}
+header.top p{margin:0;color:var(--muted);font-size:13px}
+main{max-width:960px;margin:0 auto;padding:8px 16px 24px}
+.view[hidden]{display:none}
+h2{font-size:16px;margin:0 0 12px;letter-spacing:-.01em}
+h3{font-size:14px;margin:16px 0 8px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;margin:0 0 14px;box-shadow:var(--shadow)}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 12px}
+label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+input,select,button,textarea{font:inherit;color:inherit}
+input[type=text],input[type=date],input[type=number],select{background:var(--surface-2);border:1px solid var(--line);
+  border-radius:10px;padding:9px 10px;width:100%;min-width:0;color:var(--text)}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+button{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:9px 14px;cursor:pointer;color:var(--text)}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+button.ghost{background:transparent}
+button.danger{color:var(--danger)}
+button.icon{padding:6px 10px;line-height:1}
+button.chip{border-radius:999px;padding:6px 12px;font-size:13px}
+button.chip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:3px;gap:3px;flex-wrap:wrap}
+.seg button{border:0;background:transparent;padding:7px 12px;border-radius:9px;font-size:14px}
+.seg button[aria-pressed="true"]{background:var(--surface);box-shadow:var(--shadow);font-weight:600;outline:1px solid var(--line)}
+.tablewrap{overflow-x:auto;margin:0 -4px}
+table{border-collapse:collapse;width:100%}
+th,td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:12px;color:var(--muted);font-weight:600}
+td.r,th.r{text-align:right}
+tr.click{cursor:pointer}
+tr.click:hover td{background:var(--surface-2)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow)}
+.kpi span{display:block;font-size:12px;color:var(--muted)}
+.kpi b{display:block;font-size:24px;letter-spacing:-.02em;margin-top:2px}
+.kpi b small{font-size:13px;font-weight:500;color:var(--muted);margin-left:3px}
+.kpi.hl b{color:var(--accent)}
+.hero{font-size:15px;margin:0 0 12px}
+.hero b{color:var(--accent)}
+svg.chart{width:100%;height:auto;display:block}
+svg.chart text{font-size:11px;fill:var(--muted);font-family:inherit}
+svg.chart .lbl{font-size:12px;font-weight:600}
+.splits input{padding:7px 8px}
+.splits td{border-bottom:0;padding:4px 4px}
+.warn{color:var(--danger);font-size:13px;margin:8px 0 0}
+.pill{display:inline-block;background:var(--accent-soft);color:var(--text);border-radius:999px;padding:2px 8px;font-size:12px}
+.sticky-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.empty{text-align:center;color:var(--muted);padding:28px 12px;border:2px dashed var(--line);border-radius:14px}
+.empty label{display:inline-flex;margin-top:10px}
+.empty input{display:none}
+.empty .primary{display:inline-block;padding:10px 16px;border-radius:10px;cursor:pointer}
+/* video */
+.stage{position:relative;background:#000;border-radius:12px;overflow:hidden;touch-action:none}
+.stage video{display:block;width:100%;max-height:62vh;background:#000}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%}
+.vbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:10px 0}
+.vbar .time{margin-left:auto;font-size:13px;color:var(--muted)}
+.vbar button{min-width:44px}
+input[type=range].scrub{margin:4px 0 2px}
+/* tab bar */
+nav.tabbar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);
+  display:flex;justify-content:center;padding:6px 6px calc(6px + env(safe-area-inset-bottom));z-index:10}
+nav.tabbar .in{display:flex;max-width:560px;width:100%}
+nav.tabbar button{flex:1;background:none;border:0;display:flex;flex-direction:column;align-items:center;gap:2px;
+  font-size:11px;color:var(--muted);padding:6px 2px;border-radius:10px}
+nav.tabbar button[aria-current="page"]{color:var(--accent);font-weight:600}
+nav.tabbar svg{width:24px;height:24px}
+dialog{border:1px solid var(--line);border-radius:16px;background:var(--surface);color:var(--text);padding:0;
+  width:min(720px,calc(100vw - 24px));max-height:calc(100vh - 40px)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog .dh{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface)}
+dialog .dh h2{margin:0;flex:1}
+dialog .db{padding:16px}
+.toast{position:fixed;left:50%;bottom:calc(86px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--text);color:var(--bg);
+  padding:9px 16px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:20}
+.toast.on{opacity:1}
+@media (max-width:520px){ .hide-sm{display:none} .kpi b{font-size:21px} }
+</style>
+</head>
+<body>
+<header class="top">
+  <svg width="38" height="38" viewBox="0 0 38 38" aria-hidden="true">
+    <rect width="38" height="38" rx="10" fill="var(--accent)"/>
+    <path d="M7 29 C 11 14, 17 11, 31 10" fill="none" stroke="var(--accent-ink)" stroke-width="3.2" stroke-linecap="round"/>
+    <circle cx="31" cy="10" r="3" fill="var(--accent-ink)"/>
+  </svg>
+  <div>
+    <h1>SprintLab</h1>
+    <p>Mesurer · Analyser · Progresser</p>
+  </div>
+</header>
+
+<main>
+<!-- ===================== ÉQUIPE ===================== -->
+<section class="view" id="view-team">
+  <div class="kpis" id="teamKpis"></div>
+  <div class="card">
+    <h2>Classement vitesse max</h2>
+    <div class="tablewrap"><table id="board"></table></div>
+    <p class="muted small" style="margin:10px 0 0">Touchez un athlète pour voir sa progression et ses séances.</p>
+  </div>
+  <div class="card">
+    <h2>Ajouter un athlète</h2>
+    <form id="addAthlete" class="grid2">
+      <label>Nom<input type="text" name="name" required placeholder="ex. Camille Durand"></label>
+      <label>Groupe<input type="text" name="group" placeholder="ex. Cadets"></label>
+      <label style="justify-content:flex-end"><button class="primary" type="submit">Ajouter</button></label>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Données</h2>
+    <p class="muted small" style="margin-top:-6px">Tout est enregistré dans ce navigateur. Exportez pour sauvegarder ou transférer.</p>
+    <div class="row">
+      <button id="exportBtn">Exporter (JSON)</button>
+      <label class="row" style="flex-direction:row"><span class="muted"></span>
+        <button type="button" id="importBtn">Importer…</button>
+        <input type="file" id="importFile" accept="application/json,.json" hidden>
+      </label>
+      <button id="resetBtn" class="danger">Réinitialiser avec la démo</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== CHRONO ===================== -->
+<section class="view" id="view-chrono" hidden>
+  <div class="card">
+    <h2 id="chronoTitle">Nouvelle séance</h2>
+    <div class="grid2">
+      <label>Athlète<select id="cAthlete"></select></label>
+      <label>Date<input type="date" id="cDate"></label>
+      <label>Libellé<input type="text" id="cLabel" placeholder="ex. 60 m départ accroupi"></label>
+      <label>Décalage départ (s)<input type="text" inputmode="decimal" id="cRt" value="0"></label>
+    </div>
+    <p class="muted small">Temps cumulés depuis le départ. Le décalage (temps de réaction, déclenchement…) est retiré avant le calcul du profil.</p>
+    <div class="row" style="margin:6px 0 10px">
+      <span class="muted small">Gabarits :</span>
+      <button class="chip" data-preset="10,20,30">30 m</button>
+      <button class="chip" data-preset="10,20,30,40,50,60">60 m</button>
+      <button class="chip" data-preset="10,20,30,40,50,60,70,80,90,100">100 m</button>
+      <button class="chip" data-preset="5,10,15,20">20 m (5 m)</button>
+    </div>
+    <table class="splits">
+      <thead><tr><th>Distance (m)</th><th>Temps cumulé (s)</th><th></th></tr></thead>
+      <tbody id="splitBody"></tbody>
+    </table>
+    <div class="row" style="margin-top:8px"><button id="addSplit">+ Ajouter un passage</button></div>
+    <p class="warn" id="cWarn" hidden></p>
+  </div>
+
+  <div class="card" id="cResults">
+    <h2>Profil de vitesse</h2>
+    <div class="kpis" id="cKpis"></div>
+    <div id="cChart"></div>
+    <p class="muted small" style="margin:6px 0 0"><span class="pill">barres</span> vitesse moyenne mesurée par segment · <b style="color:var(--accent)">courbe</b> modèle ajusté v(t) = Vmax·(1 − e<sup>−t/τ</sup>)</p>
+    <h3>Segments</h3>
+    <div class="tablewrap"><table id="cSegs"></table></div>
+  </div>
+  <div class="sticky-actions">
+    <button class="primary" id="saveSession">Enregistrer la séance</button>
+    <button id="newSession">Nouvelle séance</button>
+  </div>
+</section>
+
+<!-- ===================== MODÈLE ===================== -->
+<section class="view" id="view-model" hidden>
+  <div class="card">
+    <h2>Course modèle 100 m</h2>
+    <div class="grid2">
+      <label>Objectif 100 m (s)<input type="text" inputmode="decimal" id="mTarget" value="10,00"></label>
+      <label>Temps de réaction (s)<input type="text" inputmode="decimal" id="mRt" value="0,15"></label>
+      <label>Constante d'accélération τ : <output id="mTauOut"></output><input type="range" id="mTau" min="0.8" max="1.8" step="0.01" value="1.20"></label>
+      <label>Perte de vitesse en fin de course : <output id="mDecOut"></output><input type="range" id="mDec" min="0" max="12" step="0.5" value="4"></label>
+      <label>Comparer avec une séance<select id="mCompare"></select></label>
+    </div>
+  </div>
+  <div class="card">
+    <p class="hero" id="mHero"></p>
+    <div class="kpis" id="mKpis"></div>
+    <div id="mChart"></div>
+    <p class="muted small" style="margin:6px 0 0">Vitesse en fonction de la distance pour l'objectif (trait épais) et les temps voisins.</p>
+    <h3>Temps de passage</h3>
+    <div class="tablewrap"><table id="mSplits"></table></div>
+  </div>
+</section>
+
+<!-- ===================== VIDÉO ===================== -->
+<section class="view" id="view-video" hidden>
+  <div class="card">
+    <h2>Analyse vidéo</h2>
+    <div id="vEmpty" class="empty">
+      <div>Chargez une vidéo de course pour mesurer les angles articulaires,<br>l'inclinaison du tronc et les temps de contact image par image.</div>
+      <label><span class="primary">Choisir une vidéo</span><input type="file" id="vFile" accept="video/*"></label>
+      <p class="small">La vidéo reste sur votre appareil, rien n'est envoyé.</p>
+    </div>
+    <div id="vWork" hidden>
+      <div class="stage" id="stage"><video id="vid" playsinline muted preload="auto"></video><canvas id="overlay"></canvas></div>
+      <input type="range" class="scrub" id="vScrub" min="0" max="1" step="0.001" value="0" aria-label="Position">
+      <div class="vbar">
+        <button id="vPrev" title="Image précédente" aria-label="Image précédente">◀︎|</button>
+        <button id="vPlay" class="primary" aria-label="Lecture">▶︎</button>
+        <button id="vNext" title="Image suivante" aria-label="Image suivante">|▶︎</button>
+        <select id="vRate" aria-label="Vitesse de lecture" style="width:auto">
+          <option value="0.1">0,1×</option><option value="0.25">0,25×</option><option value="0.5">0,5×</option><option value="1" selected>1×</option>
+        </select>
+        <span class="time num" id="vTime"></span>
+      </div>
+      <div class="grid2">
+        <label>Images/s du fichier<select id="vFps"><option>24</option><option>25</option><option selected>30</option><option>50</option><option>60</option><option>120</option><option>240</option></select></label>
+        <label>Ralenti enregistré<select id="vSlow"><option value="1">Non (temps réel)</option><option value="2">2× (60 → 30)</option><option value="4">4× (120 → 30)</option><option value="8">8× (240 → 30)</option></select></label>
+        <label>Autre vidéo<input type="file" id="vFile2" accept="video/*"></label>
+      </div>
+      <h3>Outil</h3>
+      <div class="row">
+        <div class="seg" id="vTools">
+          <button data-tool="angle" aria-pressed="true">Angle</button>
+          <button data-tool="vert" aria-pressed="false">Inclinaison</button>
+          <button data-tool="chrono" aria-pressed="false">Chrono</button>
+        </div>
+        <button id="vUndo" class="ghost">Annuler</button>
+      </div>
+      <p class="muted small" id="vHint"></p>
+      <div id="vChronoBox" hidden>
+        <div class="row">
+          <select id="vMarkLabel" style="width:auto">
+            <option>Départ</option><option>Pose du pied</option><option>Décollage</option><option>Passage</option><option>Arrivée</option>
+          </select>
+          <button class="primary" id="vMark">Marquer cette image</button>
+        </div>
+        <div class="tablewrap" style="margin-top:10px"><table id="vMarks"></table></div>
+        <p class="small" id="vContact"></p>
+      </div>
+      <h3>Mesures</h3>
+      <div class="tablewrap"><table id="vAnnos"></table></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<nav class="tabbar" aria-label="Navigation">
+  <div class="in">
+    <button data-view="team" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.2c2.8.2 5 2.6 5 5.8"/></svg>Équipe</button>
+    <button data-view="chrono">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2M10 2.5h4M19 6l1.5-1.5"/></svg>Chrono</button>
+    <button data-view="model">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 20h18M4 17c2-8 5-10 16-10"/><circle cx="20" cy="7" r="1.6" fill="currentColor"/></svg>Modèle</button>
+    <button data-view="video">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="13.5" height="13" rx="2.5"/><path d="M16 10.5l5.5-3v9l-5.5-3z"/></svg>Vidéo</button>
+  </div>
+</nav>
+
+<dialog id="athDlg">
+  <div class="dh"><h2 id="dlgName"></h2><button class="icon ghost" id="dlgClose" aria-label="Fermer">✕</button></div>
+  <div class="db" id="dlgBody"></div>
+</dialog>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+'use strict';
+/* ============================================================
+   Utilitaires
+   ============================================================ */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const uid = () => Math.random().toString(36).slice(2, 10);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num = s => { const v = parseFloat(String(s ?? '').trim().replace(',', '.')); return Number.isFinite(v) ? v : NaN; };
+const fmt = (x, n = 2) => Number.isFinite(x) ? x.toFixed(n).replace('.', ',') : '–';
+const today = () => new Date().toISOString().slice(0, 10);
+const fmtDate = d => { try { return new Date(d + 'T12:00:00').toLocaleDateString('fr-FR', {day:'numeric', month:'short', year:'2-digit'}); } catch (e) { return d; } };
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('on'), 1800); }
+const LS = {
+  get(k){ try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+};
+
+/* ============================================================
+   Modèle de sprint (mono-exponentiel)
+   v(t) = Vmax (1 - e^{-t/τ})      d(t) = Vmax (t - τ (1 - e^{-t/τ}))
+   ============================================================ */
+const M = {
+  dist: (t, V, tau) => t <= 0 ? 0 : V * (t - tau * (1 - Math.exp(-t / tau))),
+  speed: (t, V, tau) => t <= 0 ? 0 : V * (1 - Math.exp(-t / tau)),
+  time(d, V, tau){ let lo = 0, hi = 120; for (let i = 0; i < 64; i++){ const m = (lo + hi) / 2; if (M.dist(m, V, tau) < d) lo = m; else hi = m; } return (lo + hi) / 2; },
+  /* Ajustement moindres carrés : pour chaque τ, Vmax a une solution exacte. */
+  fit(pts){
+    if (pts.length < 2) return null;
+    let best = null;
+    for (let tau = 0.15; tau <= 3.5; tau += 0.0025){
+      let sdg = 0, sgg = 0; const g = new Array(pts.length);
+      for (let i = 0; i < pts.length; i++){ g[i] = pts[i].t - tau * (1 - Math.exp(-pts[i].t / tau)); sdg += pts[i].d * g[i]; sgg += g[i] * g[i]; }
+      const V = sdg / sgg; let sse = 0;
+      for (let i = 0; i < pts.length; i++){ const r = V * g[i] - pts[i].d; sse += r * r; }
+      if (!best || sse < best.sse) best = {V, tau, sse};
+    }
+    best.rmse = Math.sqrt(best.sse / pts.length);
+    best.a0 = best.V / best.tau;
+    return best;
+  },
+  /* Course complète avec décélération : perte linéaire après ts (k = fraction perdue par seconde). */
+  run(V, tau, k, ts, until, dt = 0.002){
+    let d = 0, t = 0, vPrev = 0, vmax = 0; const out = [{t:0, d:0, v:0}];
+    while (t < 30){
+      t += dt;
+      const v = V * (1 - Math.exp(-t / tau)) * (1 - k * Math.max(0, t - ts));
+      d += (v + vPrev) / 2 * dt; vPrev = v; if (v > vmax) vmax = v;
+      if (out.length && t - out[out.length - 1].t >= 0.0199) out.push({t, d, v});
+      if (until(t, d)) break;
+    }
+    out.push({t, d, v:vPrev});
+    return {t, d, vmax, pts: out};
+  },
+  solveV(runTime, tau, k, ts){
+    let lo = 3, hi = 18;
+    for (let i = 0; i < 40; i++){
+      const m = (lo + hi) / 2; const r = M.run(m, tau, k, ts, t => t >= runTime - 1e-9, 0.004);
+      if (r.d < 100) lo = m; else hi = m;
+    }
+    return (lo + hi) / 2;
+  }
+};
+const DECEL_START = 6;            // la perte de vitesse commence vers 6 s
+const DECEL_SPAN = 4;             // % perdu sur ~4 s
+const decelK = pct => pct / 100 / DECEL_SPAN;
+
+/* ============================================================
+   Données
+   ============================================================ */
+const KEY = 'sprintlab.v1';
+function rng(seed){ return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function seed(){
+  const r = rng(42);
+  const athletes = [
+    {id:'a1', name:'Hugo Bernard', group:'Seniors'},
+    {id:'a2', name:'Léa Martin', group:'Seniors'},
+    {id:'a3', name:'Malik Diallo', group:'Espoirs'},
+    {id:'a4', name:'Inès Karim', group:'Cadets'},
+    {id:'a5', name:'Tom Lefèvre', group:'Cadets'}
+  ];
+  const prof = {a1:[10.35, 1.22], a2:[9.15, 1.12], a3:[10.75, 1.30], a4:[8.55, 1.05], a5:[9.40, 1.10]};
+  const sessions = [];
+  const base = new Date(); base.setHours(12);
+  athletes.forEach(a => {
+    for (let w = 0; w < 5; w++){
+      const [V0, tau0] = prof[a.id];
+      const V = V0 + w * 0.07 + (r() - 0.5) * 0.08, tau = tau0 - w * 0.01 + (r() - 0.5) * 0.03;
+      const dists = w % 2 ? [10,20,30] : [10,20,30,40,50,60];
+      const d = new Date(base); d.setDate(d.getDate() - (5 - w) * 9 - Math.floor(r() * 3));
+      sessions.push({
+        id: uid(), athleteId: a.id, date: d.toISOString().slice(0,10), rt: 0,
+        label: dists.length > 3 ? '60 m départ debout' : '30 m accélération',
+        splits: dists.map(x => ({d:x, t: Math.round((M.time(x, V, tau) + (r() - 0.5) * 0.02) * 100) / 100}))
+      });
+    }
+  });
+  return {athletes, sessions};
+}
+let db = (() => { try { const d = JSON.parse(LS.get(KEY)); if (d && Array.isArray(d.athletes) && Array.isArray(d.sessions)) return d; } catch (e) {} return seed(); })();
+const save = () => LS.set(KEY, JSON.stringify(db));
+const athlete = id => db.athletes.find(a => a.id === id);
+
+const fitCache = new Map();
+function sessionFit(s){
+  const key = JSON.stringify([s.splits, s.rt]);
+  if (fitCache.has(key)) return fitCache.get(key);
+  const pts = cleanSplits(s.splits).map(p => ({d:p.d, t:p.t - (s.rt || 0)})).filter(p => p.t > 0);
+  const f = M.fit(pts);
+  fitCache.set(key, f);
+  return f;
+}
+function cleanSplits(splits){ return splits.filter(p => p.d > 0 && p.t > 0).sort((a, b) => a.d - b.d); }
+function athleteStats(a){
+  const ss = db.sessions.filter(s => s.athleteId === a.id).sort((x, y) => x.date.localeCompare(y.date));
+  const fits = ss.map(s => ({s, f: sessionFit(s)})).filter(x => x.f);
+  const best = fits.reduce((b, x) => !b || x.f.V > b.f.V ? x : b, null);
+  return {ss, fits, best};
+}
+
+/* ============================================================
+   Graphiques SVG
+   ============================================================ */
+function niceStep(range, target = 5){ const raw = range / target; const p = Math.pow(10, Math.floor(Math.log10(raw))); const n = raw / p; return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * p; }
+/* viewBox proche de la taille affichée → textes lisibles sur mobile */
+function chartSize(hh){ const w = Math.round(Math.max(340, Math.min(680, window.innerWidth - 64))); return {w, h: hh || (w < 500 ? 250 : 300)}; }
+function chart(o){
+  const {w, h} = chartSize(o.h);
+  const L = 40, R = o.right ?? 46, T = 12, B = 34;
+  const pw = w - L - R, ph = h - T - B;
+  const {xMin = 0, xMax, yMin = 0, yMax} = o;
+  const X = x => L + (x - xMin) / (xMax - xMin) * pw, Y = y => T + ph - (y - yMin) / (yMax - yMin) * ph;
+  let s = `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(o.title || 'Graphique')}">`;
+  const xs = o.xStep || niceStep(xMax - xMin, 6), ys = o.yStep || niceStep(yMax - yMin, 5);
+  for (let y = Math.ceil(yMin / ys) * ys; y <= yMax + 1e-9; y += ys){
+    s += `<line x1="${L}" x2="${L + pw}" y1="${Y(y)}" y2="${Y(y)}" style="stroke:var(--grid)"/>`;
+    s += `<text x="${L - 6}" y="${Y(y) + 4}" text-anchor="end">${fmt(y, ys < 1 ? 1 : 0)}</text>`;
+  }
+  for (let x = Math.ceil(xMin / xs) * xs; x <= xMax + 1e-9; x += xs){
+    s += `<text x="${X(x)}" y="${T + ph + 16}" text-anchor="middle">${o.xFmt ? o.xFmt(x) : fmt(x, xs < 1 ? 1 : 0)}</text>`;
+  }
+  s += `<line x1="${L}" x2="${L + pw}" y1="${T + ph}" y2="${T + ph}" style="stroke:var(--line)"/>`;
+  if (o.xLabel) s += `<text x="${L + pw}" y="${h - 2}" text-anchor="end">${esc(o.xLabel)}</text>`;
+  if (o.yLabel) s += `<text x="${L - 26}" y="${T + 4}" transform="rotate(-90 ${L - 26} ${T + 4})" text-anchor="end">${esc(o.yLabel)}</text>`;
+  (o.bars || []).forEach(b => {
+    const x0 = X(b.x0) + 1, x1 = X(b.x1) - 1, y = Y(Math.max(yMin, b.y));
+    s += `<rect x="${x0}" y="${y}" width="${Math.max(0, x1 - x0)}" height="${T + ph - y}" rx="3" style="fill:${b.fill || 'var(--accent-soft)'}"/>`;
+    s += `<line x1="${x0}" x2="${x1}" y1="${y}" y2="${y}" style="stroke:${b.stroke || 'var(--accent)'};stroke-width:2;opacity:.55"/>`;
+  });
+  (o.series || []).forEach(se => {
+    if (!se.pts.length) return;
+    const d = se.pts.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join('');
+    s += `<path d="${d}" fill="none" style="stroke:${se.color};stroke-width:${se.width || 2};opacity:${se.opacity ?? 1}${se.dash ? ';stroke-dasharray:' + se.dash : ''}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (se.dots) se.pts.forEach(p => { s += `<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="3.5" style="fill:${se.color}"/>`; });
+    if (se.label){ const p = se.pts[se.pts.length - 1]; s += `<text class="lbl" x="${X(p[0]) + 5}" y="${Y(p[1]) + 4 + (se.dy || 0)}" style="fill:${se.color};opacity:${Math.max(.6, se.opacity ?? 1)}">${esc(se.label)}</text>`; }
+  });
+  (o.marks || []).forEach(m => {
+    s += `<circle cx="${X(m.x)}" cy="${Y(m.y)}" r="4.5" style="fill:var(--surface);stroke:${m.color};stroke-width:2.5"/>`;
+    if (m.text) s += `<text class="lbl" x="${X(m.x)}" y="${Y(m.y) - 10}" text-anchor="middle" style="fill:${m.color}">${esc(m.text)}</text>`;
+  });
+  return s + '</svg>';
+}
+function sparkline(vals){
+  if (vals.length < 2) return '<span class="muted small">—</span>';
+  const w = 90, h = 26, mn = Math.min(...vals), mx = Math.max(...vals), rg = (mx - mn) || 1;
+  const pts = vals.map((v, i) => [i / (vals.length - 1) * (w - 6) + 3, h - 4 - (v - mn) / rg * (h - 8)]);
+  const last = pts[pts.length - 1];
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('')}" fill="none" style="stroke:var(--accent);stroke-width:1.8" stroke-linejoin="round"/><circle cx="${last[0]}" cy="${last[1]}" r="2.6" style="fill:var(--accent)"/></svg>`;
+}
+
+/* ============================================================
+   Navigation
+   ============================================================ */
+const views = ['team', 'chrono', 'model', 'video'];
+function show(v){
+  views.forEach(x => { $('#view-' + x).hidden = x !== v; });
+  $$('nav.tabbar button').forEach(b => { if (b.dataset.view === v) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+  LS.set(KEY + '.tab', v);
+  if (v === 'team') renderTeam();
+  if (v === 'chrono') renderChrono();
+  if (v === 'model') { fillCompare(); renderModel(); }
+  if (v === 'video') requestAnimationFrame(resizeOverlay);
+  window.scrollTo(0, 0);
+}
+$$('nav.tabbar button').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+
+/* ============================================================
+   ÉQUIPE
+   ============================================================ */
+function renderTeam(){
+  const stats = db.athletes.map(a => ({a, ...athleteStats(a)}));
+  const ranked = stats.filter(x => x.best).sort((x, y) => y.best.f.V - x.best.f.V);
+  const top = ranked[0];
+  $('#teamKpis').innerHTML = `
+    <div class="kpi"><span>Athlètes</span><b>${db.athletes.length}</b></div>
+    <div class="kpi"><span>Séances</span><b>${db.sessions.length}</b></div>
+    <div class="kpi hl"><span>Vmax de l'équipe</span><b>${top ? fmt(top.best.f.V) : '–'}<small>m/s</small></b></div>
+    <div class="kpi"><span>Meilleur 30 m projeté</span><b>${ranked.length ? fmt(Math.min(...ranked.map(x => M.time(30, x.best.f.V, x.best.f.tau)))) : '–'}<small>s</small></b></div>`;
+  const rows = stats.sort((x, y) => (y.best ? y.best.f.V : -1) - (x.best ? x.best.f.V : -1)).map((x, i) => {
+    const f = x.best && x.best.f;
+    return `<tr class="click" data-id="${x.a.id}">
+      <td class="muted">${f ? i + 1 : ''}</td>
+      <td><b>${esc(x.a.name)}</b><div class="muted small">${esc(x.a.group || '')}</div></td>
+      <td class="r"><b>${f ? fmt(f.V) : '–'}</b></td>
+      <td class="r hide-sm">${f ? fmt(f.tau) : '–'}</td>
+      <td class="r">${f ? fmt(M.time(30, f.V, f.tau)) : '–'}</td>
+      <td class="r hide-sm">${x.ss.length}</td>
+      <td>${sparkline(x.fits.map(y => y.f.V))}</td></tr>`;
+  }).join('');
+  $('#board').innerHTML = `<thead><tr><th></th><th>Athlète</th><th class="r">Vmax m/s</th><th class="r hide-sm">τ s</th><th class="r">30 m s</th><th class="r hide-sm">Séances</th><th>Tendance</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">Aucun athlète.</td></tr>'}</tbody>`;
+}
+$('#board').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) openAthlete(tr.dataset.id); });
+$('#addAthlete').addEventListener('submit', e => {
+  e.preventDefault(); const f = e.target; const name = f.name.value.trim(); if (!name) return;
+  db.athletes.push({id: uid(), name, group: f.group.value.trim()}); save(); f.reset(); renderTeam(); toast('Athlète ajouté');
+});
+$('#exportBtn').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(db, null, 2)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'sprintlab-' + today() + '.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$('#importBtn').addEventListener('click', () => $('#importFile').click());
+$('#importFile').addEventListener('change', async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try { const d = JSON.parse(await file.text()); if (!Array.isArray(d.athletes) || !Array.isArray(d.sessions)) throw 0; db = d; save(); renderTeam(); toast('Données importées'); }
+  catch (err) { toast('Fichier invalide'); }
+  e.target.value = '';
+});
+$('#resetBtn').addEventListener('click', () => { if (confirm('Remplacer toutes les données par la démo ?')) { db = seed(); save(); renderTeam(); toast('Démo restaurée'); } });
+
+function openAthlete(id){
+  const a = athlete(id); if (!a) return;
+  const st = athleteStats(a);
+  $('#dlgName').textContent = a.name;
+  let html = '';
+  if (st.fits.length){
+    const vals = st.fits.map(x => x.f.V); const mn = Math.min(...vals), mx = Math.max(...vals);
+    const pts = st.fits.map((x, i) => [i, x.f.V]);
+    html += `<div class="kpis">
+      <div class="kpi hl"><span>Meilleure Vmax</span><b>${fmt(st.best.f.V)}<small>m/s</small></b></div>
+      <div class="kpi"><span>τ</span><b>${fmt(st.best.f.tau)}<small>s</small></b></div>
+      <div class="kpi"><span>Accélération initiale</span><b>${fmt(st.best.f.a0, 1)}<small>m/s²</small></b></div>
+      <div class="kpi"><span>Progression</span><b>${vals.length > 1 ? (vals[vals.length - 1] >= vals[0] ? '+' : '') + fmt(vals[vals.length - 1] - vals[0]) : '–'}<small>m/s</small></b></div></div>`;
+    html += `<h3>Vmax par séance</h3>` + chart({title:'Progression de la vitesse maximale', h:220, xMin:-0.3, xMax:Math.max(1, pts.length - 1) + 0.3, xStep:1,
+      xFmt: i => { const x = st.fits[Math.round(i)]; return x ? fmtDate(x.s.date) : ''; },
+      yMin: Math.floor((mn - 0.3) * 2) / 2, yMax: Math.ceil((mx + 0.3) * 2) / 2, yLabel:'m/s',
+      series:[{pts, color:'var(--accent)', width:2.5, dots:true}]});
+  } else html += `<p class="muted">Pas encore de séance chronométrée.</p>`;
+  html += `<h3>Séances</h3><div class="tablewrap"><table><thead><tr><th>Date</th><th>Séance</th><th class="r">Vmax</th><th class="r">30 m</th><th></th></tr></thead><tbody>` +
+    st.ss.slice().reverse().map(s => { const f = sessionFit(s); return `<tr>
+      <td>${fmtDate(s.date)}</td><td>${esc(s.label || '—')}</td><td class="r">${f ? fmt(f.V) : '–'}</td><td class="r">${f ? fmt(M.time(30, f.V, f.tau)) : '–'}</td>
+      <td class="r"><button class="icon" data-open="${s.id}">Ouvrir</button> <button class="icon danger" data-del="${s.id}" aria-label="Supprimer">✕</button></td></tr>`; }).join('') +
+    `</tbody></table></div>`;
+  html += `<div class="sticky-actions"><button class="primary" data-new="${a.id}">Nouvelle séance</button><button class="danger" data-delath="${a.id}">Supprimer l'athlète</button></div>`;
+  $('#dlgBody').innerHTML = html;
+  const dlg = $('#athDlg'); if (!dlg.open) dlg.showModal();
+}
+$('#dlgClose').addEventListener('click', () => $('#athDlg').close());
+$('#athDlg').addEventListener('click', e => {
+  if (e.target === e.currentTarget) return e.currentTarget.close();
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.dataset.open){ $('#athDlg').close(); loadSession(db.sessions.find(s => s.id === t.dataset.open)); show('chrono'); }
+  if (t.dataset.del && confirm('Supprimer cette séance ?')){ const s = db.sessions.find(x => x.id === t.dataset.del); db.sessions = db.sessions.filter(x => x.id !== t.dataset.del); save(); openAthlete(s.athleteId); renderTeam(); }
+  if (t.dataset.new){ $('#athDlg').close(); newSession(t.dataset.new); show('chrono'); }
+  if (t.dataset.delath && confirm('Supprimer l\'athlète et toutes ses séances ?')){ db.athletes = db.athletes.filter(a => a.id !== t.dataset.delath); db.sessions = db.sessions.filter(s => s.athleteId !== t.dataset.delath); save(); $('#athDlg').close(); renderTeam(); }
+});
+
+/* ============================================================
+   CHRONO
+   ============================================================ */
+let ed = null;
+function newSession(athleteId){
+  ed = {id:null, athleteId: athleteId || (ed && ed.athleteId) || (db.athletes[0] && db.athletes[0].id), date: today(), label:'', rt:0,
+        splits:[10,20,30,40,50,60].map(d => ({d, t:''}))};
+}
+function loadSession(s){ ed = JSON.parse(JSON.stringify(s)); }
+function renderChrono(){
+  if (!ed) newSession();
+  $('#chronoTitle').textContent = ed.id ? 'Modifier la séance' : 'Nouvelle séance';
+  $('#cAthlete').innerHTML = db.athletes.map(a => `<option value="${a.id}"${a.id === ed.athleteId ? ' selected' : ''}>${esc(a.name)}</option>`).join('') || '<option value="">— Ajoutez un athlète —</option>';
+  $('#cDate').value = ed.date; $('#cLabel').value = ed.label || ''; $('#cRt').value = fmt(ed.rt || 0);
+  renderSplitRows(); computeChrono();
+}
+function renderSplitRows(){
+  $('#splitBody').innerHTML = ed.splits.map((p, i) => `<tr data-i="${i}">
+    <td><input type="text" inputmode="decimal" class="sd" value="${p.d === '' ? '' : fmt(p.d, p.d % 1 ? 1 : 0)}" aria-label="Distance"></td>
+    <td><input type="text" inputmode="decimal" class="st" value="${p.t === '' || p.t == null ? '' : fmt(p.t)}" placeholder="0,00" aria-label="Temps"></td>
+    <td><button class="icon ghost" data-rm="${i}" aria-label="Supprimer le passage">✕</button></td></tr>`).join('');
+}
+function readChrono(){
+  ed.athleteId = $('#cAthlete').value; ed.date = $('#cDate').value || today(); ed.label = $('#cLabel').value.trim();
+  ed.rt = num($('#cRt').value) || 0;
+  ed.splits = $$('#splitBody tr').map(tr => { const d = num($('.sd', tr).value), t = num($('.st', tr).value); return {d: Number.isFinite(d) ? d : '', t: Number.isFinite(t) ? t : ''}; });
+}
+function computeChrono(){
+  const pts = cleanSplits(ed.splits.filter(p => p.d !== '' && p.t !== ''));
+  const rt = ed.rt || 0;
+  const warn = [];
+  for (let i = 1; i < pts.length; i++) if (pts[i].t <= pts[i - 1].t) warn.push(`Le temps à ${fmt(pts[i].d, 0)} m doit être supérieur à celui à ${fmt(pts[i - 1].d, 0)} m.`);
+  if (pts.length && pts[0].t <= rt) warn.push('Le premier temps doit être supérieur au décalage de départ.');
+  $('#cWarn').hidden = !warn.length; $('#cWarn').textContent = warn.join(' ');
+  const shifted = pts.map(p => ({d:p.d, t:p.t - rt})).filter(p => p.t > 0);
+  const f = warn.length ? null : M.fit(shifted);
+  const segs = []; let prev = {d:0, t:rt};
+  pts.forEach(p => { const dt = p.t - prev.t; segs.push({d0:prev.d, d1:p.d, dt, v: dt > 0 ? (p.d - prev.d) / dt : NaN, t:p.t}); prev = p; });
+  const bestSeg = segs.filter(s => Number.isFinite(s.v) && s.d0 > 0).reduce((b, s) => !b || s.v > b.v ? s : b, null);
+  if (!f){
+    $('#cKpis').innerHTML = ''; $('#cChart').innerHTML = `<p class="muted">Saisissez au moins deux temps de passage pour obtenir le profil de vitesse.</p>`;
+    $('#cSegs').innerHTML = ''; return;
+  }
+  const t95 = -f.tau * Math.log(0.05), d95 = M.dist(t95, f.V, f.tau);
+  $('#cKpis').innerHTML = `
+    <div class="kpi hl"><span>Vmax (modèle)</span><b>${fmt(f.V)}<small>m/s</small></b></div>
+    <div class="kpi"><span>Meilleur segment</span><b>${bestSeg ? fmt(bestSeg.v) : '–'}<small>m/s</small></b></div>
+    <div class="kpi"><span>τ</span><b>${fmt(f.tau)}<small>s</small></b></div>
+    <div class="kpi"><span>Accélération initiale</span><b>${fmt(f.a0, 1)}<small>m/s²</small></b></div>
+    <div class="kpi"><span>95 % de Vmax à</span><b>${fmt(d95, 0)}<small>m</small></b></div>
+    <div class="kpi"><span>Écart du modèle</span><b>${fmt(f.rmse * 100, 0)}<small>cm</small></b></div>`;
+  const maxD = Math.max(30, pts[pts.length - 1].d), tEnd = M.time(maxD, f.V, f.tau);
+  const curve = []; for (let i = 0; i <= 120; i++){ const t = tEnd * i / 120; curve.push([M.dist(t, f.V, f.tau), M.speed(t, f.V, f.tau)]); }
+  const yMax = Math.ceil(Math.max(f.V, bestSeg ? bestSeg.v : 0) + 1);
+  $('#cChart').innerHTML = chart({title:'Vitesse en fonction de la distance', xMax:maxD, yMax, xLabel:'distance (m)', yLabel:'vitesse (m/s)',
+    bars: segs.filter(s => Number.isFinite(s.v)).map(s => ({x0:s.d0, x1:s.d1, y:s.v})),
+    series:[{pts:curve, color:'var(--accent)', width:3, label: fmt(f.V) }]});
+  $('#cSegs').innerHTML = `<thead><tr><th>Segment</th><th class="r hide-sm">Passage</th><th class="r">Temps</th><th class="r">V moy.</th><th class="r">V modèle</th></tr></thead><tbody>` +
+    segs.map(s => `<tr><td>${fmt(s.d0, 0)}–${fmt(s.d1, 0)} m</td><td class="r hide-sm">${fmt(s.t)}</td><td class="r">${fmt(s.dt)}</td><td class="r"><b>${fmt(s.v)}</b></td><td class="r">${fmt(M.speed(M.time(s.d1, f.V, f.tau), f.V, f.tau))}</td></tr>`).join('') + '</tbody>';
+}
+$('#view-chrono').addEventListener('input', e => { if (e.target.closest('.splits') || ['cRt'].includes(e.target.id)) { readChrono(); computeChrono(); } });
+$('#view-chrono').addEventListener('change', () => readChrono());
+$('#splitBody').addEventListener('click', e => { const b = e.target.closest('[data-rm]'); if (!b) return; readChrono(); ed.splits.splice(+b.dataset.rm, 1); renderSplitRows(); computeChrono(); });
+$('#addSplit').addEventListener('click', () => { readChrono(); const last = ed.splits[ed.splits.length - 1]; ed.splits.push({d: last && last.d !== '' ? last.d + 10 : 10, t:''}); renderSplitRows(); $$('#splitBody .st').pop().focus(); });
+$$('[data-preset]').forEach(b => b.addEventListener('click', () => {
+  readChrono(); const old = new Map(ed.splits.map(p => [p.d, p.t]));
+  ed.splits = b.dataset.preset.split(',').map(Number).map(d => ({d, t: old.get(d) ?? ''})); renderSplitRows(); computeChrono();
+}));
+$('#saveSession').addEventListener('click', () => {
+  readChrono();
+  if (!ed.athleteId){ toast('Ajoutez d\'abord un athlète'); return; }
+  const splits = cleanSplits(ed.splits.filter(p => p.d !== '' && p.t !== ''));
+  if (splits.length < 1){ toast('Saisissez au moins un temps'); return; }
+  const rec = {id: ed.id || uid(), athleteId: ed.athleteId, date: ed.date, label: ed.label, rt: ed.rt, splits};
+  const i = db.sessions.findIndex(s => s.id === rec.id);
+  if (i >= 0) db.sessions[i] = rec; else db.sessions.push(rec);
+  save(); ed.id = rec.id; $('#chronoTitle').textContent = 'Modifier la séance'; toast('Séance enregistrée');
+});
+$('#newSession').addEventListener('click', () => { newSession(); renderChrono(); });
+
+/* ============================================================
+   MODÈLE
+   ============================================================ */
+function fillCompare(){
+  const sel = $('#mCompare'), cur = sel.value;
+  const opts = db.sessions.slice().sort((a, b) => b.date.localeCompare(a.date)).map(s => { const a = athlete(s.athleteId); return `<option value="${s.id}">${esc(a ? a.name : '?')} · ${fmtDate(s.date)} · ${esc(s.label || '')}</option>`; });
+  sel.innerHTML = '<option value="">— Aucune —</option>' + opts.join('');
+  sel.value = cur;
+}
+function renderModel(){
+  const target = num($('#mTarget').value), rt = num($('#mRt').value) || 0, tau = +$('#mTau').value, dec = +$('#mDec').value;
+  $('#mTauOut').textContent = fmt(tau) + ' s'; $('#mDecOut').textContent = fmt(dec, 1) + ' %';
+  if (!(target > rt + 5 && target < 25)){ $('#mHero').textContent = 'Entrez un objectif réaliste (entre 9 et 20 s).'; $('#mKpis').innerHTML = $('#mChart').innerHTML = $('#mSplits').innerHTML = ''; return; }
+  const k = decelK(dec);
+  const runOf = T => { const V = M.solveV(T - rt, tau, k, DECEL_START); return {T, V, r: M.run(V, tau, k, DECEL_START, (t, d) => d >= 100)}; };
+  const main = runOf(target);
+  const plus = runOf(target - 0.1);
+  const offsets = [-0.6, -0.3, 0.3, 0.6];
+  const others = offsets.map(o => runOf(Math.round((target + o) * 100) / 100)).filter(x => x.T - rt > 5);
+  const tPeak = main.r.pts.reduce((b, p) => p.v > b.v ? p : b, main.r.pts[0]);
+  const at = d => { const p = main.r.pts; for (let i = 1; i < p.length; i++) if (p[i].d >= d){ const a = p[i - 1], b = p[i], u = (d - a.d) / (b.d - a.d); return {t: a.t + u * (b.t - a.t), v: a.v + u * (b.v - a.v)}; } return p[p.length - 1]; };
+  $('#mHero').innerHTML = `Pour courir <b>${fmt(target)} s</b>, il faut atteindre environ <b>${fmt(main.r.vmax)} m/s</b>. Gagner 0,1 s demande ≈ <b>+${fmt(plus.r.vmax - main.r.vmax)} m/s</b> de vitesse max.`;
+  const finish = main.r.pts[main.r.pts.length - 1].v;
+  $('#mKpis').innerHTML = `
+    <div class="kpi hl"><span>Vitesse max requise</span><b>${fmt(main.r.vmax)}<small>m/s</small></b></div>
+    <div class="kpi"><span>Atteinte vers</span><b>${fmt(tPeak.d, 0)}<small>m</small></b></div>
+    <div class="kpi"><span>Passage 30 m</span><b>${fmt(at(30).t + rt)}<small>s</small></b></div>
+    <div class="kpi"><span>Passage 60 m</span><b>${fmt(at(60).t + rt)}<small>s</small></b></div>
+    <div class="kpi"><span>Vitesse à l'arrivée</span><b>${fmt(finish)}<small>m/s</small></b></div>`;
+  const toSeries = (x, main) => ({pts: x.r.pts.filter((p, i) => i % 3 === 0 || i === x.r.pts.length - 1).map(p => [Math.min(100, p.d), p.v]),
+    color: main ? 'var(--accent)' : 'var(--muted)', width: main ? 3.2 : 1.4, opacity: main ? 1 : .5, label: fmt(x.T)});
+  const allV = [main, ...others].map(x => x.r.vmax);
+  let series = others.map(x => toSeries(x, false)).concat([toSeries(main, true)]);
+  let bars = [];
+  const cmp = db.sessions.find(s => s.id === $('#mCompare').value);
+  if (cmp){
+    let prev = {d:0, t:cmp.rt || 0};
+    cleanSplits(cmp.splits).forEach(p => { const dt = p.t - prev.t; if (dt > 0) bars.push({x0:prev.d, x1:Math.min(100, p.d), y:(p.d - prev.d) / dt, fill:'color-mix(in srgb, var(--series2) 22%, transparent)', stroke:'var(--series2)'}); prev = p; });
+    const f = sessionFit(cmp);
+    if (f){ const pts = []; const tE = M.time(Math.min(100, cleanSplits(cmp.splits).pop().d), f.V, f.tau); for (let i = 0; i <= 60; i++){ const t = tE * i / 60; pts.push([M.dist(t, f.V, f.tau), M.speed(t, f.V, f.tau)]); }
+      series.push({pts, color:'var(--series2)', width:2.4, dash:'6 4', label: (athlete(cmp.athleteId) || {name:'?'}).name.split(' ')[0]}); allV.push(f.V); }
+  }
+  // décale les étiquettes qui se chevauchent
+  const lab = series.filter(s => s.label).map(s => ({s, y: s.pts[s.pts.length - 1][1]})).sort((a, b) => b.y - a.y);
+  const yMin = 0, yMax = Math.ceil(Math.max(...allV) + 0.6), pxPerU = (chartSize().h - 12 - 34) / (yMax - yMin);
+  let lastPx = -Infinity;
+  lab.forEach(l => { const px = (yMax - l.y) * pxPerU, np = Math.max(px, lastPx + 13); l.s.dy = np - px; lastPx = np; });
+  $('#mChart').innerHTML = chart({title:'Courses modèles', xMax:100, yMax, xStep:10, xLabel:'distance (m)', yLabel:'vitesse (m/s)', right:54, bars, series,
+    marks:[{x:tPeak.d, y:tPeak.v, color:'var(--accent)', text: fmt(tPeak.v) + ' m/s'}]});
+  let rows = '', pt = 0;
+  for (let d = 10; d <= 100; d += 10){ const a = at(d); rows += `<tr><td>${d} m</td><td class="r"><b>${fmt(a.t + rt)}</b></td><td class="r">${fmt(a.t - pt)}</td><td class="r">${fmt(a.v)}</td></tr>`; pt = a.t; }
+  $('#mSplits').innerHTML = `<thead><tr><th>Distance</th><th class="r">Passage (s)</th><th class="r">Segment (s)</th><th class="r">Vitesse (m/s)</th></tr></thead><tbody>${rows}</tbody>`;
+}
+['#mTarget', '#mRt', '#mTau', '#mDec', '#mCompare'].forEach(s => $(s).addEventListener('input', renderModel));
+$('#mCompare').addEventListener('change', renderModel);
+
+/* ============================================================
+   VIDÉO
+   ============================================================ */
+const vid = $('#vid'), cv = $('#overlay'), ctx = cv.getContext('2d');
+const VS = {tool:'angle', pending:[], annos:[], marks:[], drag:null, url:null};
+const fps = () => +$('#vFps').value, slow = () => +$('#vSlow').value;
+const hints = {
+  angle: 'Touchez 3 points : extrémité, articulation (sommet de l\'angle), extrémité. Ex. hanche → genou → cheville. Les points se déplacent au doigt.',
+  vert: 'Touchez 2 points d\'un segment (ex. hanche puis épaule pour le tronc) : l\'angle par rapport à la verticale s\'affiche.',
+  chrono: 'Avancez image par image et marquez les événements : départ, poses et décollages du pied, passages. Les temps tiennent compte du ralenti.'
+};
+function loadVideo(file){
+  if (!file) return;
+  if (VS.url) URL.revokeObjectURL(VS.url);
+  VS.url = URL.createObjectURL(file); vid.src = VS.url; VS.annos = []; VS.marks = []; VS.pending = [];
+  $('#vEmpty').hidden = true; $('#vWork').hidden = false; renderAnnos(); renderMarks();
+}
+$('#vFile').addEventListener('change', e => loadVideo(e.target.files[0]));
+$('#vFile2').addEventListener('change', e => loadVideo(e.target.files[0]));
+vid.addEventListener('loadedmetadata', () => { $('#vScrub').max = vid.duration || 1; resizeOverlay(); updTime(); });
+vid.addEventListener('loadeddata', () => { resizeOverlay(); });
+vid.addEventListener('seeked', () => { draw(); updTime(); });
+vid.addEventListener('timeupdate', updTime);
+vid.addEventListener('play', () => { $('#vPlay').textContent = '❚❚'; loop(); });
+vid.addEventListener('pause', () => { $('#vPlay').textContent = '▶︎'; draw(); });
+window.addEventListener('resize', resizeOverlay);
+function loop(){ draw(); updTime(); if (!vid.paused && !vid.ended) requestAnimationFrame(loop); }
+function updTime(){
+  const t = vid.currentTime || 0; $('#vScrub').value = t;
+  $('#vTime').textContent = `${fmt(t, 3)} s · image ${Math.round(t * fps())}` + (slow() > 1 ? ` · réel ${fmt(t / slow(), 3)} s` : '');
+}
+$('#vPlay').addEventListener('click', () => vid.paused ? vid.play() : vid.pause());
+const step = dir => { vid.pause(); vid.currentTime = Math.max(0, Math.min(vid.duration || 0, (Math.round(vid.currentTime * fps()) + dir) / fps() + 0.0001)); };
+$('#vPrev').addEventListener('click', () => step(-1));
+$('#vNext').addEventListener('click', () => step(1));
+$('#vRate').addEventListener('change', e => { vid.playbackRate = +e.target.value; });
+$('#vScrub').addEventListener('input', e => { vid.pause(); vid.currentTime = +e.target.value; });
+$('#vFps').addEventListener('change', () => { updTime(); draw(); renderAnnos(); });
+$('#vSlow').addEventListener('change', () => { updTime(); renderMarks(); renderAnnos(); });
+document.addEventListener('keydown', e => {
+  if ($('#view-video').hidden || $('#vWork').hidden || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  if (e.key === 'ArrowLeft'){ step(-1); e.preventDefault(); }
+  if (e.key === 'ArrowRight'){ step(1); e.preventDefault(); }
+  if (e.key === ' '){ vid.paused ? vid.play() : vid.pause(); e.preventDefault(); }
+});
+function setTool(t){
+  VS.tool = t; VS.pending = [];
+  $$('#vTools button').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === t));
+  $('#vHint').textContent = hints[t]; $('#vChronoBox').hidden = t !== 'chrono'; draw();
+}
+$('#vTools').addEventListener('click', e => { const b = e.target.closest('[data-tool]'); if (b) setTool(b.dataset.tool); });
+$('#vUndo').addEventListener('click', () => {
+  if (VS.tool === 'chrono'){ VS.marks.pop(); renderMarks(); }
+  else if (VS.pending.length) VS.pending.pop(); else { VS.annos.pop(); renderAnnos(); }
+  draw();
+});
+
+/* géométrie : coordonnées normalisées dans l'image réelle (gère le letterbox) */
+function contentRect(){
+  const W = cv.clientWidth, H = cv.clientHeight, vw = vid.videoWidth || 16, vh = vid.videoHeight || 9;
+  const s = Math.min(W / vw, H / vh), cw = vw * s, ch = vh * s;
+  return {x:(W - cw) / 2, y:(H - ch) / 2, w:cw, h:ch, vw, vh};
+}
+function resizeOverlay(){
+  const dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(cv.clientWidth * dpr); cv.height = Math.round(cv.clientHeight * dpr); draw();
+}
+const toScreen = (p, r) => [r.x + p[0] * r.w, r.y + p[1] * r.h];
+function angleAt(a, b, c, r){
+  const v1 = [(a[0] - b[0]) * r.vw, (a[1] - b[1]) * r.vh], v2 = [(c[0] - b[0]) * r.vw, (c[1] - b[1]) * r.vh];
+  const cos = (v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(...v1) * Math.hypot(...v2) || 1);
+  return Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+}
+function vsVertical(a, b, r){ const dx = (b[0] - a[0]) * r.vw, dy = (b[1] - a[1]) * r.vh; return Math.atan2(Math.abs(dx), Math.abs(dy)) * 180 / Math.PI; }
+function annoValue(an){ const r = contentRect(); return an.type === 'angle' ? angleAt(an.pts[0], an.pts[1], an.pts[2], r) : vsVertical(an.pts[0], an.pts[1], r); }
+const onFrame = an => Math.abs(an.time - vid.currentTime) < 0.6 / fps();
+function draw(){
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+  if (!vid.videoWidth) return;
+  const r = contentRect(), cA = '#3ddc97', c2 = '#a5a6ff'; // couleurs vives fixes : lisibles sur toute vidéo
+  VS.annos.filter(onFrame).forEach(an => drawAnno(an.type, an.pts, r, an.type === 'angle' ? cA : c2, annoValue(an)));
+  if (VS.pending.length){
+    const type = VS.tool, col = type === 'angle' ? cA : c2;
+    drawAnno(type, VS.pending, r, col, null);
+  }
+}
+function drawAnno(type, pts, r, col, val){
+  const P = pts.map(p => toScreen(p, r));
+  ctx.lineWidth = 3; ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 4;
+  ctx.beginPath(); P.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke();
+  if (type === 'vert' && P.length === 2){
+    ctx.setLineDash([5, 5]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]); ctx.lineTo(P[0][0], P[1][1]); ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (type === 'angle' && P.length === 3){
+    const a1 = Math.atan2(P[0][1] - P[1][1], P[0][0] - P[1][0]), a2 = Math.atan2(P[2][1] - P[1][1], P[2][0] - P[1][0]);
+    let d = a2 - a1; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+    ctx.globalAlpha = .25; ctx.beginPath(); ctx.moveTo(P[1][0], P[1][1]); ctx.arc(P[1][0], P[1][1], 26, a1, a1 + d, d < 0); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+  }
+  ctx.shadowBlur = 0;
+  P.forEach(p => { ctx.beginPath(); ctx.arc(p[0], p[1], 7, 0, 7); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 3; ctx.stroke(); });
+  if (val != null){
+    const at = type === 'angle' ? P[1] : [(P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2];
+    const txt = Math.round(val) + '°' + (type === 'vert' ? ' / vert.' : '');
+    ctx.font = '600 15px system-ui, sans-serif'; const w = ctx.measureText(txt).width + 14;
+    const x = Math.min(cv.clientWidth - w - 4, at[0] + 14), y = Math.max(4, at[1] - 34);
+    ctx.fillStyle = 'rgba(10,12,16,.82)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, 24, 12) : ctx.rect(x, y, w, 24); ctx.fill();
+    ctx.fillStyle = col; ctx.fillText(txt, x + 7, y + 17);
+  }
+}
+function hit(e){
+  const r = contentRect(), b = cv.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
+  const cands = [...VS.annos.filter(onFrame).map(an => an.pts), VS.pending];
+  for (const pts of cands) for (let i = 0; i < pts.length; i++){ const s = toScreen(pts[i], r); if (Math.hypot(s[0] - x, s[1] - y) < 22) return {pts, i}; }
+  return null;
+}
+function normPt(e){ const r = contentRect(), b = cv.getBoundingClientRect(); return [Math.max(0, Math.min(1, (e.clientX - b.left - r.x) / r.w)), Math.max(0, Math.min(1, (e.clientY - b.top - r.y) / r.h))]; }
+cv.addEventListener('pointerdown', e => {
+  if (!vid.videoWidth) return;
+  const h = hit(e);
+  if (h){ VS.drag = h; cv.setPointerCapture(e.pointerId); return; }
+  if (VS.tool === 'chrono') return;
+  vid.pause();
+  VS.pending.push(normPt(e));
+  const need = VS.tool === 'angle' ? 3 : 2;
+  if (VS.pending.length === need){ VS.annos.push({id: uid(), type: VS.tool, pts: VS.pending, time: vid.currentTime}); VS.pending = []; renderAnnos(); }
+  draw();
+});
+cv.addEventListener('pointermove', e => { if (!VS.drag) return; VS.drag.pts[VS.drag.i] = normPt(e); draw(); });
+cv.addEventListener('pointerup', () => { if (VS.drag){ VS.drag = null; renderAnnos(); } });
+function renderAnnos(){
+  const rows = VS.annos.slice().sort((a, b) => a.time - b.time).map(an => `<tr>
+    <td>${an.type === 'angle' ? 'Angle' : 'Inclinaison / verticale'}</td><td class="r"><b>${Math.round(annoValue(an))}°</b></td>
+    <td class="r">image ${Math.round(an.time * fps())}</td>
+    <td class="r"><button class="icon" data-go="${an.id}">Voir</button> <button class="icon danger" data-x="${an.id}" aria-label="Supprimer">✕</button></td></tr>`).join('');
+  $('#vAnnos').innerHTML = rows ? `<tbody>${rows}</tbody>` : '<tbody><tr><td class="muted">Aucune mesure pour l\'instant.</td></tr></tbody>';
+}
+$('#vAnnos').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.go){ const an = VS.annos.find(a => a.id === b.dataset.go); vid.pause(); vid.currentTime = an.time; }
+  if (b.dataset.x){ VS.annos = VS.annos.filter(a => a.id !== b.dataset.x); renderAnnos(); draw(); }
+});
+$('#vMark').addEventListener('click', () => { if (!vid.videoWidth) return; vid.pause(); VS.marks.push({label: $('#vMarkLabel').value, time: vid.currentTime}); VS.marks.sort((a, b) => a.time - b.time); renderMarks();
+  const next = {'Pose du pied':'Décollage', 'Décollage':'Pose du pied', 'Départ':'Pose du pied'}[$('#vMarkLabel').value]; if (next) $('#vMarkLabel').value = next; });
+function renderMarks(){
+  const s = slow(); const t0 = (VS.marks.find(m => m.label === 'Départ') || VS.marks[0] || {time:0}).time;
+  $('#vMarks').innerHTML = VS.marks.length ? `<thead><tr><th>Événement</th><th class="r">Image</th><th class="r">Temps réel (s)</th><th class="r">Δ (s)</th><th></th></tr></thead><tbody>` +
+    VS.marks.map((m, i) => `<tr><td>${esc(m.label)}</td><td class="r">${Math.round(m.time * fps())}</td><td class="r"><b>${fmt((m.time - t0) / s, 3)}</b></td>
+      <td class="r">${i ? fmt((m.time - VS.marks[i - 1].time) / s, 3) : '–'}</td><td class="r"><button class="icon danger" data-mx="${i}" aria-label="Supprimer">✕</button></td></tr>`).join('') + '</tbody>'
+    : '<tbody><tr><td class="muted">Aucun événement marqué.</td></tr></tbody>';
+  const contact = [], flight = [];
+  for (let i = 1; i < VS.marks.length; i++){
+    const a = VS.marks[i - 1], b = VS.marks[i], dt = (b.time - a.time) / s;
+    if (a.label === 'Pose du pied' && b.label === 'Décollage') contact.push(dt);
+    if (a.label === 'Décollage' && b.label === 'Pose du pied') flight.push(dt);
+  }
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  $('#vContact').innerHTML = (contact.length ? `Temps de contact moyen : <b>${fmt(avg(contact), 3)} s</b> (${contact.length}) · ` : '') + (flight.length ? `Temps de vol moyen : <b>${fmt(avg(flight), 3)} s</b> (${flight.length})` : '');
+}
+$('#vMarks').addEventListener('click', e => { const b = e.target.closest('[data-mx]'); if (b){ VS.marks.splice(+b.dataset.mx, 1); renderMarks(); } });
+
+/* ============================================================
+   Démarrage
+   ============================================================ */
+setTool('angle');
+const startTab = LS.get(KEY + '.tab');
+show(views.includes(startTab) ? startTab : 'team');
+</script>
+</body>
+</html>
