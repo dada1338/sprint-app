@@ -26,6 +26,7 @@
   --grid:#222932; --danger:#ff6b6b; --shadow:none; color-scheme:dark;
 }
 *{box-sizing:border-box}
+[hidden]{display:none !important}
 html,body{margin:0}
 body{background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   padding-bottom:calc(76px + env(safe-area-inset-bottom));-webkit-tap-highlight-color:transparent}
@@ -95,6 +96,16 @@ svg.chart .lbl{font-size:12px;font-weight:600}
 .vbar .time{margin-left:auto;font-size:13px;color:var(--muted)}
 .vbar button{min-width:44px}
 input[type=range].scrub{margin:4px 0 2px}
+.progress{height:8px;background:var(--surface-2);border-radius:99px;overflow:hidden;margin:10px 0 4px}
+.progress div{height:100%;width:0;background:var(--accent);transition:width .15s}
+label.check{flex-direction:row;align-items:center;gap:8px;color:var(--text);font-size:14px;cursor:pointer}
+label.check input{width:20px;height:20px;accent-color:var(--accent)}
+details.more{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+details.more summary{cursor:pointer;font-weight:600;font-size:14px;padding:4px 0}
+details.more[open] summary{margin-bottom:10px}
+.chip .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0}
+.ai-box{background:var(--surface-2);border-radius:12px;padding:12px;margin-top:12px}
+.ai-box p{margin:6px 0 0}
 /* tab bar */
 nav.tabbar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);
   display:flex;justify-content:center;padding:6px 6px calc(6px + env(safe-area-inset-bottom));z-index:10}
@@ -226,7 +237,7 @@ dialog .db{padding:16px}
   <div class="card">
     <h2>Analyse vidéo</h2>
     <div id="vEmpty" class="empty">
-      <div>Chargez une vidéo de course pour mesurer les angles articulaires,<br>l'inclinaison du tronc et les temps de contact image par image.</div>
+      <div>Chargez une vidéo de course filmée de profil.<br>Le squelette est suivi automatiquement : angles en direct, appuis, temps de contact et longueur de foulée.</div>
       <label><span class="primary">Choisir une vidéo</span><input type="file" id="vFile" accept="video/*"></label>
       <p class="small">La vidéo reste sur votre appareil, rien n'est envoyé.</p>
     </div>
@@ -242,34 +253,80 @@ dialog .db{padding:16px}
         </select>
         <span class="time num" id="vTime"></span>
       </div>
-      <div class="grid2">
-        <label>Images/s du fichier<select id="vFps"><option>24</option><option>25</option><option selected>30</option><option>50</option><option>60</option><option>120</option><option>240</option></select></label>
-        <label>Ralenti enregistré<select id="vSlow"><option value="1">Non (temps réel)</option><option value="2">2× (60 → 30)</option><option value="4">4× (120 → 30)</option><option value="8">8× (240 → 30)</option></select></label>
-        <label>Autre vidéo<input type="file" id="vFile2" accept="video/*"></label>
-      </div>
-      <h3>Outil</h3>
-      <div class="row">
-        <div class="seg" id="vTools">
-          <button data-tool="angle" aria-pressed="true">Angle</button>
-          <button data-tool="vert" aria-pressed="false">Inclinaison</button>
-          <button data-tool="chrono" aria-pressed="false">Chrono</button>
-        </div>
-        <button id="vUndo" class="ghost">Annuler</button>
-      </div>
-      <p class="muted small" id="vHint"></p>
-      <div id="vChronoBox" hidden>
+
+      <div class="ai-box">
         <div class="row">
-          <select id="vMarkLabel" style="width:auto">
-            <option>Départ</option><option>Pose du pied</option><option>Décollage</option><option>Passage</option><option>Arrivée</option>
-          </select>
-          <button class="primary" id="vMark">Marquer cette image</button>
+          <button class="primary" id="aiRun">Analyser automatiquement</button>
+          <label class="check"><input type="checkbox" id="aiLive"> Suivi en direct</label>
         </div>
-        <div class="tablewrap" style="margin-top:10px"><table id="vMarks"></table></div>
-        <p class="small" id="vContact"></p>
+        <div class="progress" id="aiProg" hidden><div></div></div>
+        <p class="muted small" id="aiStatus">Un modèle d'IA détecte le squelette image par image, directement sur votre appareil. « Analyser » traite toutes les images pour mesurer les appuis ; « Suivi en direct » affiche le squelette pendant la lecture.</p>
+        <div class="row" style="margin-top:10px">
+          <span class="muted small">Afficher :</span>
+          <button class="chip" data-layer="skeleton" aria-pressed="true">Squelette</button>
+          <button class="chip" data-layer="angles" aria-pressed="true">Angles</button>
+          <button class="chip" data-layer="steps" aria-pressed="true">Appuis et foulées</button>
+        </div>
       </div>
-      <h3>Mesures</h3>
-      <div class="tablewrap"><table id="vAnnos"></table></div>
+
+      <details class="more" id="vSettings">
+        <summary>Réglages de la vidéo et de l'étalonnage</summary>
+        <div class="grid2">
+          <label>Images/s du fichier<select id="vFps"><option>24</option><option>25</option><option selected>30</option><option>50</option><option>60</option><option>120</option><option>240</option></select></label>
+          <label>Ralenti enregistré<select id="vSlow"><option value="1">Non (temps réel)</option><option value="2">2× (60 → 30)</option><option value="4">4× (120 → 30)</option><option value="8">8× (240 → 30)</option></select></label>
+          <label>Caméra<select id="vCam"><option value="fixed">Fixe (sur pied)</option><option value="pan">Suit l'athlète</option></select></label>
+          <label>Précision du modèle<select id="aiModel"><option value="0">Rapide</option><option value="1" selected>Standard</option><option value="2">Précise (plus lente)</option></select></label>
+          <label class="fixed-only">Étalonnage<select id="vCalib"><option value="height">Taille de l'athlète</option><option value="points">2 repères au sol</option></select></label>
+          <label class="fixed-only calib-height">Taille de l'athlète (m)<input type="text" inputmode="decimal" id="vHeight" value="1,80"></label>
+          <label class="fixed-only calib-points" hidden>Distance entre les repères (m)<input type="text" inputmode="decimal" id="vCalibDist" value="5"></label>
+          <label class="fixed-only calib-points" hidden style="justify-content:flex-end"><button type="button" id="vCalibBtn">Placer les 2 repères</button></label>
+          <label class="pan-only" hidden>Vitesse de course (m/s)<input type="text" inputmode="decimal" id="vSpeed" value="9,0"></label>
+          <label>Sensibilité de détection d'appui : <output id="vThrOut"></output><input type="range" id="vThr" min="0.02" max="0.15" step="0.005" value="0.06"></label>
+        </div>
+        <p class="muted small">Plage analysée : <b id="vRangeTxt">toute la vidéo</b></p>
+        <div class="row">
+          <button id="vRangeA">Début ici</button><button id="vRangeB">Fin ici</button><button id="vRangeAll" class="ghost">Toute la vidéo</button>
+          <label class="row" style="flex-direction:row;margin-left:auto"><button type="button" id="vOther">Autre vidéo…</button><input type="file" id="vFile2" accept="video/*" hidden></label>
+        </div>
+        <p class="muted small">Conseils : filmez de profil, l'athlète entier dans le cadre, idéalement en ralenti (120 ou 240 i/s). En caméra fixe, les longueurs de pas sont mesurées sur l'image ; si la caméra suit l'athlète, elles sont déduites de la vitesse indiquée.</p>
+      </details>
     </div>
+  </div>
+
+  <div class="card" id="gaitCard" hidden>
+    <h2>Foulée</h2>
+    <div class="kpis" id="gKpis"></div>
+    <h3>Angles au fil du temps</h3>
+    <div class="row" id="gSeries"></div>
+    <div id="gChart" style="margin-top:8px;cursor:pointer"></div>
+    <p class="muted small" style="margin:6px 0 0">Bandes colorées : appuis au sol (G ou D). Touchez le graphique pour aller à cet instant de la vidéo.</p>
+    <h3>Appuis</h3>
+    <div class="tablewrap"><table id="gSteps"></table></div>
+    <p class="muted small" id="gNote"></p>
+  </div>
+
+  <div class="card" id="manualCard" hidden>
+    <h2>Mesures manuelles</h2>
+    <div class="row">
+      <div class="seg" id="vTools">
+        <button data-tool="angle" aria-pressed="false">Angle</button>
+        <button data-tool="vert" aria-pressed="false">Inclinaison</button>
+        <button data-tool="chrono" aria-pressed="false">Chrono</button>
+      </div>
+      <button id="vUndo" class="ghost">Annuler</button>
+    </div>
+    <p class="muted small" id="vHint"></p>
+    <div id="vChronoBox" hidden>
+      <div class="row">
+        <select id="vMarkLabel" style="width:auto">
+          <option>Départ</option><option>Pose du pied</option><option>Décollage</option><option>Passage</option><option>Arrivée</option>
+        </select>
+        <button class="primary" id="vMark">Marquer cette image</button>
+      </div>
+      <div class="tablewrap" style="margin-top:10px"><table id="vMarks"></table></div>
+      <p class="small" id="vContact"></p>
+    </div>
+    <div class="tablewrap"><table id="vAnnos"></table></div>
   </div>
 </section>
 </main>
@@ -427,7 +484,8 @@ function chart(o){
   const pw = w - L - R, ph = h - T - B;
   const {xMin = 0, xMax, yMin = 0, yMax} = o;
   const X = x => L + (x - xMin) / (xMax - xMin) * pw, Y = y => T + ph - (y - yMin) / (yMax - yMin) * ph;
-  let s = `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(o.title || 'Graphique')}">`;
+  let s = `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(o.title || 'Graphique')}" data-w="${w}" data-l="${L}" data-pw="${pw}" data-xmin="${xMin}" data-xmax="${xMax}">`;
+  (o.bands || []).forEach(b => { s += `<rect x="${X(b.x0)}" y="${T}" width="${Math.max(1, X(b.x1) - X(b.x0))}" height="${ph}" style="fill:${b.fill}"/>`; });
   const xs = o.xStep || niceStep(xMax - xMin, 6), ys = o.yStep || niceStep(yMax - yMin, 5);
   for (let y = Math.ceil(yMin / ys) * ys; y <= yMax + 1e-9; y += ys){
     s += `<line x1="${L}" x2="${L + pw}" y1="${Y(y)}" y2="${Y(y)}" style="stroke:var(--grid)"/>`;
@@ -455,6 +513,7 @@ function chart(o){
     s += `<circle cx="${X(m.x)}" cy="${Y(m.y)}" r="4.5" style="fill:var(--surface);stroke:${m.color};stroke-width:2.5"/>`;
     if (m.text) s += `<text class="lbl" x="${X(m.x)}" y="${Y(m.y) - 10}" text-anchor="middle" style="fill:${m.color}">${esc(m.text)}</text>`;
   });
+  if (o.cursor != null) s += `<line class="cursor" x1="${X(o.cursor)}" x2="${X(o.cursor)}" y1="${T}" y2="${T + ph}" style="stroke:var(--text);stroke-width:1.5;opacity:.7"/>`;
   return s + '</svg>';
 }
 function sparkline(vals){
@@ -699,54 +758,425 @@ function renderModel(){
 $('#mCompare').addEventListener('change', renderModel);
 
 /* ============================================================
-   VIDÉO
+   VIDÉO — lecture image par image, suivi automatique du squelette
+   (MediaPipe Pose, exécuté localement), appuis, contacts, foulées
    ============================================================ */
 const vid = $('#vid'), cv = $('#overlay'), ctx = cv.getContext('2d');
-const VS = {tool:'angle', pending:[], annos:[], marks:[], drag:null, url:null};
+const COL_L = '#22a7e0', COL_R = '#ff7a3d', COL_MAN = '#3ddc97', COL_MAN2 = '#c4b5fd', COL_CAL = '#ffd23f';
+const VS = {tool:null, pending:[], annos:[], marks:[], drag:null, url:null,
+  frames:new Map(), framesFps:null, gait:null, range:null, calib:[],
+  layers:{skeleton:true, angles:true, steps:true}, series:new Set(['kneeL', 'kneeR'])};
 const fps = () => +$('#vFps').value, slow = () => +$('#vSlow').value;
+const dtReal = () => 1 / (fps() * slow());
+const frameAt = t => Math.max(0, Math.floor(t * fps() + 1e-4));
+const isPan = () => $('#vCam').value === 'pan';
+const median = a => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : NaN; };
+const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : NaN;
 const hints = {
-  angle: 'Touchez 3 points : extrémité, articulation (sommet de l\'angle), extrémité. Ex. hanche → genou → cheville. Les points se déplacent au doigt.',
-  vert: 'Touchez 2 points d\'un segment (ex. hanche puis épaule pour le tronc) : l\'angle par rapport à la verticale s\'affiche.',
-  chrono: 'Avancez image par image et marquez les événements : départ, poses et décollages du pied, passages. Les temps tiennent compte du ralenti.'
+  angle: 'Touchez 3 points : extrémité, articulation (sommet de l\'angle), extrémité. Les points se déplacent au doigt.',
+  vert: 'Touchez 2 points d\'un segment (ex. hanche puis épaule) : l\'angle par rapport à la verticale s\'affiche.',
+  chrono: 'Avancez image par image et marquez les événements à la main : départ, poses et décollages du pied, passages.',
+  calib: 'Touchez 2 repères au sol dont vous connaissez l\'écart (plots, lignes). Caméra fixe uniquement.'
 };
+
 function loadVideo(file){
   if (!file) return;
+  if (AI.running) AI.cancel = true;
   if (VS.url) URL.revokeObjectURL(VS.url);
-  VS.url = URL.createObjectURL(file); vid.src = VS.url; VS.annos = []; VS.marks = []; VS.pending = [];
-  $('#vEmpty').hidden = true; $('#vWork').hidden = false; renderAnnos(); renderMarks();
+  VS.url = URL.createObjectURL(file); vid.src = VS.url;
+  Object.assign(VS, {annos:[], marks:[], pending:[], calib:[], range:null, gait:null, frames:new Map()});
+  if (AI.pose) AI.pose.reset();
+  $('#vEmpty').hidden = true; $('#vWork').hidden = false; $('#manualCard').hidden = false; $('#gaitCard').hidden = true;
+  renderAnnos(); renderMarks(); renderRange();
 }
 $('#vFile').addEventListener('change', e => loadVideo(e.target.files[0]));
 $('#vFile2').addEventListener('change', e => loadVideo(e.target.files[0]));
+$('#vOther').addEventListener('click', () => $('#vFile2').click());
 vid.addEventListener('loadedmetadata', () => { $('#vScrub').max = vid.duration || 1; resizeOverlay(); updTime(); });
-vid.addEventListener('loadeddata', () => { resizeOverlay(); });
-vid.addEventListener('seeked', () => { draw(); updTime(); });
+vid.addEventListener('loadeddata', resizeOverlay);
+vid.addEventListener('seeked', () => { draw(); updTime(); if ($('#aiLive').checked && !AI.running) liveDetect(vid.currentTime); });
 vid.addEventListener('timeupdate', updTime);
-vid.addEventListener('play', () => { $('#vPlay').textContent = '❚❚'; loop(); });
+vid.addEventListener('play', () => { $('#vPlay').textContent = '❚❚'; loop(); liveStart(); });
 vid.addEventListener('pause', () => { $('#vPlay').textContent = '▶︎'; draw(); });
-window.addEventListener('resize', resizeOverlay);
+window.addEventListener('resize', () => { resizeOverlay(); if (VS.gait) renderGaitChart(); });
 function loop(){ draw(); updTime(); if (!vid.paused && !vid.ended) requestAnimationFrame(loop); }
 function updTime(){
   const t = vid.currentTime || 0; $('#vScrub').value = t;
-  $('#vTime').textContent = `${fmt(t, 3)} s · image ${Math.round(t * fps())}` + (slow() > 1 ? ` · réel ${fmt(t / slow(), 3)} s` : '');
+  $('#vTime').textContent = `${fmt(t, 3)} s · image ${frameAt(t)}` + (slow() > 1 ? ` · réel ${fmt(t / slow(), 3)} s` : '');
+  const svg = $('#gChart svg');
+  if (svg && VS.gait){
+    const d = svg.dataset, x = (frameAt(t) + 0.5) * dtReal(), line = svg.querySelector('.cursor');
+    const X = +d.l + (x - d.xmin) / (d.xmax - d.xmin) * d.pw;
+    if (line){ line.setAttribute('x1', X); line.setAttribute('x2', X); line.style.display = x < d.xmin || x > d.xmax ? 'none' : ''; }
+  }
 }
 $('#vPlay').addEventListener('click', () => vid.paused ? vid.play() : vid.pause());
-const step = dir => { vid.pause(); vid.currentTime = Math.max(0, Math.min(vid.duration || 0, (Math.round(vid.currentTime * fps()) + dir) / fps() + 0.0001)); };
+const step = dir => { vid.pause(); vid.currentTime = Math.max(0, Math.min(vid.duration || 0, (frameAt(vid.currentTime) + dir + 0.5) / fps())); };
 $('#vPrev').addEventListener('click', () => step(-1));
 $('#vNext').addEventListener('click', () => step(1));
 $('#vRate').addEventListener('change', e => { vid.playbackRate = +e.target.value; });
 $('#vScrub').addEventListener('input', e => { vid.pause(); vid.currentTime = +e.target.value; });
-$('#vFps').addEventListener('change', () => { updTime(); draw(); renderAnnos(); });
-$('#vSlow').addEventListener('change', () => { updTime(); renderMarks(); renderAnnos(); });
 document.addEventListener('keydown', e => {
   if ($('#view-video').hidden || $('#vWork').hidden || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
   if (e.key === 'ArrowLeft'){ step(-1); e.preventDefault(); }
   if (e.key === 'ArrowRight'){ step(1); e.preventDefault(); }
   if (e.key === ' '){ vid.paused ? vid.play() : vid.pause(); e.preventDefault(); }
 });
+
+/* ---------- Réglages ---------- */
+function syncSettings(){
+  const pan = isPan(), pts = $('#vCalib').value === 'points';
+  $$('.fixed-only').forEach(e => { e.hidden = pan; });
+  $$('.pan-only').forEach(e => { e.hidden = !pan; });
+  if (!pan){ $$('.calib-height').forEach(e => { e.hidden = pts; }); $$('.calib-points').forEach(e => { e.hidden = !pts; }); }
+  $('#vThrOut').textContent = Math.round(+$('#vThr').value * 100) + ' %';
+}
+['#vCam', '#vCalib', '#vHeight', '#vCalibDist', '#vSpeed', '#vThr', '#vSlow'].forEach(s => $(s).addEventListener('input', () => { syncSettings(); recomputeGait(); updTime(); renderMarks(); renderAnnos(); }));
+$('#vFps').addEventListener('change', () => {
+  if (VS.frames.size){ VS.frames = new Map(); VS.gait = null; renderGait(); setStatus('Fréquence d\'images modifiée : relancez l\'analyse.'); }
+  updTime(); draw(); renderAnnos(); renderMarks();
+});
+$('#aiModel').addEventListener('change', () => { if (AI.pose){ AI.pose.setOptions({modelComplexity: +$('#aiModel').value}); setStatus('Précision modifiée : relancez l\'analyse pour l\'appliquer.'); } });
+$('#vCalibBtn').addEventListener('click', () => { VS.calib = []; setTool('calib'); vid.pause(); $('#stage').scrollIntoView({behavior:'smooth', block:'center'}); });
+function renderRange(){ $('#vRangeTxt').textContent = VS.range ? `${fmt(VS.range[0])} → ${fmt(VS.range[1])} s` : 'toute la vidéo'; }
+$('#vRangeA').addEventListener('click', () => { const b = VS.range ? VS.range[1] : vid.duration; VS.range = [vid.currentTime, vid.currentTime < b ? b : vid.duration]; renderRange(); });
+$('#vRangeB').addEventListener('click', () => { const a = VS.range ? VS.range[0] : 0; VS.range = [vid.currentTime > a ? a : 0, vid.currentTime]; renderRange(); });
+$('#vRangeAll').addEventListener('click', () => { VS.range = null; renderRange(); });
+$$('[data-layer]').forEach(b => b.addEventListener('click', () => { const k = b.dataset.layer; VS.layers[k] = !VS.layers[k]; b.setAttribute('aria-pressed', VS.layers[k]); draw(); }));
+
+/* ---------- Modèle d'IA (MediaPipe Pose) ---------- */
+const MP_BASE = window.SPRINTLAB_MP_BASE || 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/';
+const AI = {pose:null, ready:null, busy:false, onRes:null, running:false, cancel:false, lastF:-9};
+function setStatus(t){ $('#aiStatus').textContent = t; }
+function loadScript(src){ return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.crossOrigin = 'anonymous'; s.onload = res; s.onerror = () => rej(new Error('script')); document.head.appendChild(s); }); }
+function ensurePose(){
+  if (AI.ready) return AI.ready;
+  AI.ready = (async () => {
+    setStatus('Chargement du modèle d\'IA (une seule fois)…');
+    if (!window.Pose) await loadScript(MP_BASE + 'pose.js');
+    const pose = new window.Pose({locateFile: f => MP_BASE + f});
+    pose.setOptions({modelComplexity: +$('#aiModel').value, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5});
+    pose.onResults(r => { const cb = AI.onRes; AI.onRes = null; if (cb) cb(r); });
+    await pose.initialize();
+    AI.pose = pose; setStatus('Modèle prêt.');
+    return pose;
+  })();
+  AI.ready.catch(() => { AI.ready = null; setStatus('Impossible de charger le modèle d\'IA : une connexion internet est nécessaire la première fois.'); });
+  return AI.ready;
+}
+function detect(){
+  return new Promise((res, rej) => {
+    let done = false; const fin = r => { if (!done){ done = true; AI.onRes = null; res(r || {}); } };
+    AI.onRes = fin;
+    AI.pose.send({image: vid}).then(() => setTimeout(() => fin(null), 30), e => { if (!done){ done = true; AI.onRes = null; rej(e); } });
+  });
+}
+function pack(lm){ if (!lm) return null; const a = new Float32Array(99); lm.forEach((p, i) => { a[i * 3] = p.x; a[i * 3 + 1] = p.y; a[i * 3 + 2] = p.visibility ?? 1; }); return a; }
+function seekTo(t){ return new Promise(res => { let done = false; const fin = () => { if (done) return; done = true; vid.removeEventListener('seeked', fin); res(); }; vid.addEventListener('seeked', fin); setTimeout(fin, 2500); vid.currentTime = t; }); }
+function prepFrames(){ if (VS.framesFps !== fps()){ VS.frames = new Map(); VS.framesFps = fps(); } }
+
+async function analyzeAll(){
+  if (AI.running){ AI.cancel = true; return; }
+  if (!vid.videoWidth) return;
+  vid.pause();
+  try { await ensurePose(); } catch (e) { return; }
+  prepFrames();
+  AI.running = true; AI.cancel = false; $('#aiRun').textContent = 'Arrêter'; $('#aiProg').hidden = false;
+  const F = fps(), nMax = Math.max(1, Math.floor((vid.duration || 0) * F));
+  const [a, b] = VS.range || [0, vid.duration];
+  const f0 = Math.max(0, frameAt(a)), f1 = Math.min(nMax - 1, frameAt(b)), tot = f1 - f0 + 1, t0 = performance.now();
+  AI.pose.reset();
+  for (let f = f0; f <= f1 && !AI.cancel; f++){
+    await seekTo((f + 0.5) / F);
+    try { const r = await detect(); VS.frames.set(f, pack(r.poseLandmarks)); } catch (e) { VS.frames.set(f, null); }
+    AI.lastF = f;
+    const done = f - f0 + 1;
+    $('#aiProg div').style.width = (done / tot * 100) + '%';
+    if (done % 4 === 0 || done === tot){
+      const left = (performance.now() - t0) / done * (tot - done) / 1000;
+      setStatus(`Analyse : image ${done} / ${tot}` + (done >= 12 ? ` · encore ~${Math.ceil(left)} s` : ''));
+      draw();
+    }
+  }
+  AI.running = false; $('#aiRun').textContent = 'Analyser automatiquement'; $('#aiProg').hidden = true;
+  const nOk = [...VS.frames.values()].filter(Boolean).length;
+  setStatus((AI.cancel ? 'Analyse interrompue' : 'Analyse terminée') + ` : squelette détecté sur ${nOk} image${nOk > 1 ? 's' : ''}.` + (nOk ? '' : ' Vérifiez que l\'athlète est entièrement visible.'));
+  recomputeGait(); draw();
+  if (VS.gait) $('#gaitCard').scrollIntoView({behavior:'smooth', block:'start'});
+}
+$('#aiRun').addEventListener('click', analyzeAll);
+
+function liveDetect(t){
+  if (!AI.pose || AI.busy || AI.running) return;
+  prepFrames();
+  const f = frameAt(t); if (VS.frames.has(f)) return;
+  if (Math.abs(f - AI.lastF) > 3) AI.pose.reset();    // saut dans la vidéo : pas de lissage avec l'ancienne position
+  AI.busy = true; AI.lastF = f;
+  detect().then(r => { VS.frames.set(f, pack(r.poseLandmarks)); }).catch(() => {}).finally(() => { AI.busy = false; draw(); scheduleGait(); });
+}
+function liveStart(){
+  if (!$('#aiLive').checked) return;
+  ensurePose().then(() => {
+    const tick = (now, meta) => {
+      if (!$('#aiLive').checked || vid.paused || vid.ended) return;
+      liveDetect(meta ? meta.mediaTime : vid.currentTime); schedule();
+    };
+    const schedule = () => vid.requestVideoFrameCallback ? vid.requestVideoFrameCallback(tick) : requestAnimationFrame(() => tick());
+    if (!vid.paused) schedule(); else liveDetect(vid.currentTime);
+  }).catch(() => {});
+}
+$('#aiLive').addEventListener('change', liveStart);
+let gaitTimer = null;
+function scheduleGait(){ clearTimeout(gaitTimer); gaitTimer = setTimeout(recomputeGait, 700); }
+
+/* ---------- Angles et foulée ---------- */
+const lmPx = (a, i) => [a[i * 3] * vid.videoWidth, a[i * 3 + 1] * vid.videoHeight];
+const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+function ang3(a, b, c){
+  const v1 = [a[0] - b[0], a[1] - b[1]], v2 = [c[0] - b[0], c[1] - b[1]];
+  const cos = (v1[0] * v2[0] + v1[1] * v2[1]) / ((Math.hypot(...v1) * Math.hypot(...v2)) || 1);
+  return Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+}
+const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+function poseAngles(a){
+  const g = i => lmPx(a, i), sh = mid(g(11), g(12)), hp = mid(g(23), g(24));
+  return {
+    kneeL: ang3(g(23), g(25), g(27)), kneeR: ang3(g(24), g(26), g(28)),
+    hipL: ang3(g(11), g(23), g(25)), hipR: ang3(g(12), g(24), g(26)),
+    trunk: Math.atan2(Math.abs(sh[0] - hp[0]), Math.abs(sh[1] - hp[1])) * 180 / Math.PI,
+    elbowL: ang3(g(11), g(13), g(15)), elbowR: ang3(g(12), g(14), g(16))
+  };
+}
+const SERIES = [
+  {k:'kneeL', label:'Genou G', color:COL_L}, {k:'kneeR', label:'Genou D', color:COL_R},
+  {k:'hipL', label:'Hanche G', color:COL_L, dash:'7 4'}, {k:'hipR', label:'Hanche D', color:COL_R, dash:'7 4'},
+  {k:'trunk', label:'Tronc', color:'var(--accent)'},
+  {k:'elbowL', label:'Coude G', color:COL_L, dash:'2 4'}, {k:'elbowR', label:'Coude D', color:COL_R, dash:'2 4'}
+];
+/* mètres par pixel : taille de l'athlète (cuisse + jambe ≈ 49 % de la taille) ou 2 repères au sol */
+function scaleMPerPx(rows){
+  if (isPan()) return null;
+  if ($('#vCalib').value === 'points'){
+    if (VS.calib.length < 2) return null;
+    const D = num($('#vCalibDist').value), px = Math.hypot((VS.calib[0][0] - VS.calib[1][0]) * vid.videoWidth, (VS.calib[0][1] - VS.calib[1][1]) * vid.videoHeight);
+    return D > 0 && px > 0 ? D / px : null;
+  }
+  const H = num($('#vHeight').value); if (!(H > 0.8 && H < 2.5)) return null;
+  const legs = rows.map(r => r.leg).sort((x, y) => x - y);
+  return 0.491 * H / legs[Math.floor((legs.length - 1) * 0.9)];
+}
+function computeGait(){
+  if (!vid.videoWidth || VS.framesFps !== fps()) return null;
+  const dt = dtReal(), rows = [];
+  [...VS.frames.keys()].sort((x, y) => x - y).forEach(f => {
+    const a = VS.frames.get(f); if (!a) return;
+    const g = i => lmPx(a, i);
+    const foot = (he, to, side) => { const H = g(he), T = g(to); return {y: Math.max(H[1], T[1]), x: (H[0] + T[0]) / 2, side}; };
+    const fl = foot(29, 31, 'G'), fr = foot(30, 32, 'D');
+    const legL = dist(g(23), g(25)) + dist(g(25), g(27)), legR = dist(g(24), g(26)) + dist(g(26), g(28));
+    rows.push({f, t: (f + 0.5) * dt, low: fl.y >= fr.y ? fl : fr, leg: Math.max(legL, legR), ang: poseAngles(a)});
+  });
+  if (rows.length < 6) return null;
+  const legMed = median(rows.map(r => r.leg));
+  const W = Math.max(3, Math.round(0.35 / dt)), thr = +$('#vThr').value * legMed;
+  // niveau du sol local = point le plus bas atteint par un pied dans une fenêtre de ±0,35 s
+  rows.forEach((r, i) => {
+    let g = -Infinity;
+    for (let j = i; j >= 0 && r.f - rows[j].f <= W; j--) g = Math.max(g, rows[j].low.y);
+    for (let j = i + 1; j < rows.length && rows[j].f - r.f <= W; j++) g = Math.max(g, rows[j].low.y);
+    r.contact = r.low.y >= g - thr;
+  });
+  // images d'appui consécutives → un appui ; un saut horizontal du pied le plus bas = appui suivant
+  const groups = []; let cur = null;
+  rows.forEach(r => {
+    if (!r.contact){ cur = null; return; }
+    if (cur && r.f - cur.last.f <= 4 && Math.abs(r.low.x - cur.last.low.x) < 0.5 * legMed){ cur.rows.push(r); cur.last = r; }
+    else { cur = {rows:[r], last:r}; groups.push(cur); }
+  });
+  const first = rows[0].f, last = rows[rows.length - 1].f;
+  const contacts = groups.filter(g => g.rows.length >= 2).map(g => {
+    const rs = g.rows, nG = rs.filter(r => r.low.side === 'G').length;
+    // bornes affinées : pose et décollage = images où le pied est à moins d'un tiers du seuil de son point le plus bas
+    const gy = Math.max(...rs.map(r => r.low.y)), core = rs.filter(r => r.low.y >= gy - thr / 3);
+    const f0 = core[0].f, f1 = core[core.length - 1].f;
+    return {f0, f1, side: nG * 2 >= rs.length ? 'G' : 'D', x: median(core.map(r => r.low.x)), y: median(core.map(r => r.low.y)),
+      tc: (f1 - f0 + 1) * dt, cutStart: rs[0].f <= first + 1, cutEnd: rs[rs.length - 1].f >= last - 1, td: core[0].ang, to: core[core.length - 1].ang};
+  });
+  const pan = isPan(), scale = scaleMPerPx(rows), vIn = num($('#vSpeed').value);
+  const steps = contacts.map((c, i) => {
+    const n = contacts[i + 1], s = {c, flight:null, stepT:null, len:null};
+    if (n){
+      const stepT = (n.f0 - c.f0) * dt;
+      if (stepT < 0.6){
+        s.flight = c.cutEnd ? null : (n.f0 - c.f1 - 1) * dt;
+        s.stepT = c.cutStart ? null : stepT;
+        if (!pan && scale) s.len = Math.abs(n.x - c.x) * scale;
+        else if (pan && vIn > 0 && s.stepT) s.len = vIn * s.stepT;
+      }
+    }
+    return s;
+  });
+  const okC = contacts.filter(c => !c.cutStart && !c.cutEnd);
+  const stepTs = steps.map(s => s.stepT).filter(Boolean), lens = steps.map(s => s.len).filter(Boolean);
+  const summary = {
+    tc: mean(okC.map(c => c.tc)), flight: mean(steps.map(s => s.flight).filter(x => x != null)),
+    stepT: mean(stepTs), len: mean(lens), freq: 1 / mean(stepTs),
+    speed: pan ? (vIn > 0 ? vIn : NaN) : mean(steps.filter(s => s.len && s.stepT).map(s => s.len / s.stepT))
+  };
+  return {rows, contacts, steps, scale, legMed, dt, pan, summary};
+}
+function recomputeGait(){ VS.gait = computeGait(); renderGait(); draw(); }
+function smooth(pts){ return pts.map((p, i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]; return [p[0], (a[1] + p[1] + b[1]) / 3]; }); }
+const kpi = (label, val, unit, hl) => `<div class="kpi${hl ? ' hl' : ''}"><span>${label}</span><b>${val}<small>${unit}</small></b></div>`;
+function renderGait(){
+  const G = VS.gait; $('#gaitCard').hidden = !G; if (!G) return;
+  const S = G.summary;
+  $('#gKpis').innerHTML = kpi('Temps de contact', fmt(S.tc, 3), 's', true) + kpi('Temps de vol', fmt(S.flight, 3), 's') +
+    kpi('Fréquence', fmt(S.freq, 2), 'pas/s') + kpi('Longueur de pas', fmt(S.len, 2), 'm', true) +
+    kpi(G.pan ? 'Vitesse (saisie)' : 'Vitesse', fmt(S.speed, 2), 'm/s') + kpi('Appuis détectés', G.contacts.length, '');
+  $('#gSeries').innerHTML = SERIES.map(s => `<button class="chip" data-s="${s.k}" aria-pressed="${VS.series.has(s.k)}"><span class="dot" style="background:${s.color}"></span>${s.label}</button>`).join('');
+  renderGaitChart();
+  const kn = (c, a) => fmt(c.side === 'G' ? a.kneeL : a.kneeR, 0) + '°';
+  $('#gSteps').innerHTML = G.contacts.length ? `<thead><tr><th>#</th><th>Pied</th><th class="r">Instant (s)</th><th class="r">Contact (s)</th><th class="r">Vol (s)</th><th class="r">Pas (m)</th><th class="r hide-sm">Genou pose</th><th class="r hide-sm">Genou décoll.</th></tr></thead><tbody>` +
+    G.steps.map((s, i) => { const c = s.c; return `<tr class="click" data-f="${c.f0}">
+      <td class="muted">${i + 1}</td><td><span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c.side === 'G' ? COL_L : COL_R};margin-right:6px"></span>${c.side}</td>
+      <td class="r">${fmt(c.f0 * G.dt, 3)}</td><td class="r"><b>${c.cutStart || c.cutEnd ? '(' + fmt(c.tc, 3) + ')' : fmt(c.tc, 3)}</b></td>
+      <td class="r">${s.flight != null ? fmt(s.flight, 3) : '–'}</td><td class="r"><b>${s.len ? fmt(s.len, 2) : '–'}</b></td>
+      <td class="r hide-sm">${kn(c, c.td)}</td><td class="r hide-sm">${kn(c, c.to)}</td></tr>`; }).join('') + '</tbody>'
+    : '<tbody><tr><td class="muted">Aucun appui détecté. Ajustez la sensibilité dans les réglages ou analysez une plage où les pieds touchent le sol.</td></tr></tbody>';
+  const notes = [];
+  if (!G.pan && !G.scale) notes.push('Longueurs de pas : renseignez l\'étalonnage (taille de l\'athlète ou 2 repères au sol).');
+  if (!G.pan && G.scale && $('#vCalib').value === 'height') notes.push('Étalonnage par la taille de l\'athlète : précision ≈ ±5 %. Deux repères au sol donnent un résultat plus précis.');
+  if (G.contacts.some(c => c.cutStart || c.cutEnd)) notes.push('Entre parenthèses : appui coupé par le début ou la fin de la plage analysée (exclu des moyennes).');
+  if (slow() === 1 && fps() <= 30) notes.push('À 30 images/s, un appui ne dure que 3 images : filmez en ralenti pour des temps de contact précis.');
+  $('#gNote').textContent = notes.join(' ');
+}
+function renderGaitChart(){
+  const G = VS.gait; if (!G) return;
+  const sel = SERIES.filter(s => VS.series.has(s.k));
+  let mn = 180, mx = 0;
+  const series = sel.map(s => { const pts = smooth(G.rows.map(r => [r.t, r.ang[s.k]])); pts.forEach(p => { mn = Math.min(mn, p[1]); mx = Math.max(mx, p[1]); }); return {pts, color:s.color, width:2.2, dash:s.dash}; });
+  if (!sel.length){ mn = 0; mx = 180; }
+  const yMin = Math.max(0, Math.floor((mn - 5) / 10) * 10), yMax = Math.max(yMin + 20, Math.min(180, Math.ceil((mx + 5) / 10) * 10));
+  const x0 = G.rows[0].t - G.dt / 2, x1 = G.rows[G.rows.length - 1].t + G.dt / 2;
+  const bands = G.contacts.map(c => ({x0: c.f0 * G.dt, x1: (c.f1 + 1) * G.dt, fill: c.side === 'G' ? 'rgba(34,167,224,.18)' : 'rgba(255,122,61,.18)'}));
+  $('#gChart').innerHTML = chart({title:'Angles articulaires au fil du temps', xMin:x0, xMax:Math.max(x1, x0 + 0.05), yMin, yMax, xLabel:'temps réel (s)', yLabel:'angle (°)', right:12, series, bands, cursor:(frameAt(vid.currentTime) + 0.5) * G.dt});
+  updTime();
+}
+$('#gSeries').addEventListener('click', e => { const b = e.target.closest('[data-s]'); if (!b) return; const k = b.dataset.s; VS.series.has(k) ? VS.series.delete(k) : VS.series.add(k); b.setAttribute('aria-pressed', VS.series.has(k)); renderGaitChart(); });
+$('#gChart').addEventListener('click', e => {
+  const svg = $('#gChart svg'); if (!svg) return;
+  const b = svg.getBoundingClientRect(), d = svg.dataset, sx = (e.clientX - b.left) / b.width * d.w;
+  const x = +d.xmin + (sx - d.l) / d.pw * (d.xmax - d.xmin);
+  vid.pause(); vid.currentTime = Math.max(0, Math.min(vid.duration, (Math.floor(x / dtReal()) + 0.5) / fps()));
+});
+$('#gSteps').addEventListener('click', e => { const tr = e.target.closest('tr[data-f]'); if (!tr) return; vid.pause(); vid.currentTime = (+tr.dataset.f + 0.5) / fps(); $('#stage').scrollIntoView({behavior:'smooth', block:'center'}); });
+
+/* ---------- Dessin sur la vidéo ---------- */
+function contentRect(){
+  const W = cv.clientWidth, H = cv.clientHeight, vw = vid.videoWidth || 16, vh = vid.videoHeight || 9;
+  const s = Math.min(W / vw, H / vh), cw = vw * s, ch = vh * s;
+  return {x:(W - cw) / 2, y:(H - ch) / 2, w:cw, h:ch, vw, vh};
+}
+function resizeOverlay(){ const dpr = window.devicePixelRatio || 1; cv.width = Math.round(cv.clientWidth * dpr); cv.height = Math.round(cv.clientHeight * dpr); draw(); }
+const toScreen = (p, r) => [r.x + p[0] * r.w, r.y + p[1] * r.h];
+const pxToScreen = (x, y, r) => [r.x + x / r.vw * r.w, r.y + y / r.vh * r.h];
+function pill(x, y, txt, col, align = 'left', size = 14){
+  ctx.font = `600 ${size}px system-ui, sans-serif`;
+  const w = ctx.measureText(txt).width + 12, h = size + 9;
+  let px = align === 'right' ? x - w : align === 'center' ? x - w / 2 : x;
+  px = Math.max(2, Math.min(cv.clientWidth - w - 2, px)); const py = Math.max(2, Math.min(cv.clientHeight - h - 2, y - h / 2));
+  ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(10,12,16,.8)'; ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(px, py, w, h, h / 2); else ctx.rect(px, py, w, h);
+  ctx.fill(); ctx.fillStyle = col; ctx.fillText(txt, px + 6, py + h / 2 + size * 0.36);
+}
+function curLandmarks(){ const f = frameAt(vid.currentTime); for (const k of [f, f - 1, f + 1, f - 2]) { const a = VS.frames.get(k); if (a) return a; } return null; }
+const BONES = [[11,12],[11,23],[12,24],[23,24],[11,13],[13,15],[12,14],[14,16],[23,25],[25,27],[27,29],[29,31],[27,31],[24,26],[26,28],[28,30],[30,32],[28,32]];
+function drawSkeleton(a, r){
+  const S = i => toScreen([a[i * 3], a[i * 3 + 1]], r), lw = Math.max(2.5, r.h / 140);
+  ctx.lineCap = 'round'; ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 4;
+  BONES.forEach(([i, j]) => {
+    ctx.strokeStyle = (i % 2 && j % 2) ? COL_L : (!(i % 2) && !(j % 2)) ? COL_R : '#ffffff';
+    ctx.lineWidth = lw; ctx.beginPath(); const p = S(i), q = S(j); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
+  });
+  ctx.shadowBlur = 0;
+  [11,12,13,14,15,16,23,24,25,26,27,28].forEach(i => { const p = S(i); ctx.beginPath(); ctx.arc(p[0], p[1], lw * 1.3, 0, 7); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = i % 2 ? COL_L : COL_R; ctx.stroke(); });
+  const n = S(0); ctx.beginPath(); ctx.arc(n[0], n[1], lw * 1.6, 0, 7); ctx.fillStyle = '#fff'; ctx.fill();
+}
+function drawAngles(a, r){
+  const S = i => toScreen([a[i * 3], a[i * 3 + 1]], r), A = poseAngles(a);
+  const hp = mid(S(23), S(24)), sh = mid(S(11), S(12)), len = dist(hp, sh);
+  ctx.setLineDash([5, 5]); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,.8)';
+  ctx.beginPath(); ctx.moveTo(hp[0], hp[1]); ctx.lineTo(hp[0], hp[1] - len); ctx.stroke(); ctx.setLineDash([]);
+  // étiquettes sur les articulations seulement si l'athlète est assez grand à l'écran
+  const leg = Math.max(dist(S(23), S(25)) + dist(S(25), S(27)), dist(S(24), S(26)) + dist(S(26), S(28)));
+  if (leg > 110){
+    pill(S(25)[0] - 12, S(25)[1], Math.round(A.kneeL) + '°', COL_L, 'right');
+    pill(S(26)[0] + 12, S(26)[1], Math.round(A.kneeR) + '°', COL_R, 'left');
+    pill(S(23)[0] - 12, S(23)[1] + 16, Math.round(A.hipL) + '°', COL_L, 'right', 12);
+    pill(S(24)[0] + 12, S(24)[1] + 16, Math.round(A.hipR) + '°', COL_R, 'left', 12);
+  }
+  return [[`G  genou ${Math.round(A.kneeL)}°  hanche ${Math.round(A.hipL)}°`, COL_L], [`D  genou ${Math.round(A.kneeR)}°  hanche ${Math.round(A.hipR)}°`, COL_R], [`Tronc ${Math.round(A.trunk)}°`, '#ffffff']];
+}
+/* encadré fixe en haut à droite : phase (appui / vol) + angles en direct */
+function drawHud(lines){
+  if (!lines.length) return;
+  const fs = cv.clientWidth < 420 ? 11 : 13; ctx.font = `600 ${fs}px system-ui, sans-serif`; ctx.shadowBlur = 0;
+  const w = Math.max(...lines.map(l => ctx.measureText(l[0]).width)) + 16, lh = fs + 6, h = lines.length * lh + 8, x = cv.clientWidth - w - 8, y = 8;
+  ctx.fillStyle = 'rgba(10,12,16,.78)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, 10); else ctx.rect(x, y, w, h); ctx.fill();
+  lines.forEach(([t, c], i) => { ctx.fillStyle = c; ctx.fillText(t, x + 8, y + 4 + lh * (i + 1) - 5); });
+}
+function drawSteps(r, f){
+  const G = VS.gait; if (!G) return null;
+  if (!G.pan){
+    const vis = G.contacts.map((c, i) => ({c, i, s: G.steps[i]})).filter(x => x.c.f0 <= f);
+    vis.forEach(({c, i}) => {
+      const [x, y] = pxToScreen(c.x, c.y, r), col = c.side === 'G' ? COL_L : COL_R;
+      ctx.globalAlpha = .9; ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(x, y, 11, 5, 0, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+      ctx.font = '600 11px system-ui, sans-serif'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(String(i + 1), x, y + 4); ctx.textAlign = 'left';
+    });
+    for (let k = 0; k + 1 < vis.length; k++){
+      const a = vis[k], b = vis[k + 1]; if (b.i !== a.i + 1 || !a.s.len) continue;
+      const A = pxToScreen(a.c.x, a.c.y, r), B = pxToScreen(b.c.x, b.c.y, r), y = Math.max(A[1], B[1]) + 22;
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.8; ctx.shadowColor = 'rgba(0,0,0,.7)'; ctx.shadowBlur = 3;
+      ctx.beginPath(); ctx.moveTo(A[0], y); ctx.lineTo(B[0], y); ctx.moveTo(A[0], y - 6); ctx.lineTo(A[0], y + 6); ctx.moveTo(B[0], y - 6); ctx.lineTo(B[0], y + 6); ctx.stroke(); ctx.shadowBlur = 0;
+      pill((A[0] + B[0]) / 2, y + 16, fmt(a.s.len, 2) + ' m', '#ffffff', 'center', 13);
+    }
+  }
+  // état courant : appui ou vol
+  const c = G.contacts.find(c => f >= c.f0 && f <= c.f1);
+  if (c) return [`APPUI ${c.side} · contact ${fmt(c.tc, 3)} s`, c.side === 'G' ? COL_L : COL_R];
+  if (G.contacts.some(x => x.f1 < f) && G.contacts.some(x => x.f0 > f)) return ['VOL', '#ffffff'];
+  return null;
+}
+function drawCalib(r){
+  const P = VS.calib.map(p => toScreen(p, r));
+  ctx.strokeStyle = COL_CAL; ctx.fillStyle = COL_CAL; ctx.lineWidth = 2;
+  if (P.length === 2){ ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]); ctx.lineTo(P[1][0], P[1][1]); ctx.stroke(); ctx.setLineDash([]); }
+  P.forEach(p => { ctx.beginPath(); ctx.arc(p[0], p[1], 7, 0, 7); ctx.fill(); });
+  if (P.length === 2) pill((P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2 - 18, fmt(num($('#vCalibDist').value), 2) + ' m', COL_CAL, 'center', 13);
+}
+function draw(){
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+  if (!vid.videoWidth) return;
+  const r = contentRect(), f = frameAt(vid.currentTime), a = curLandmarks();
+  const hud = [];
+  if (VS.layers.steps){ const ph = drawSteps(r, f); if (ph) hud.push(ph); }
+  if (a && VS.layers.skeleton) drawSkeleton(a, r);
+  if (a && VS.layers.angles) hud.push(...drawAngles(a, r));
+  drawHud(hud);
+  if (VS.calib.length && !isPan() && ($('#vCalib').value === 'points' || VS.tool === 'calib')) drawCalib(r);
+  VS.annos.filter(onFrame).forEach(an => drawAnno(an.type, an.pts, r, an.type === 'angle' ? COL_MAN : COL_MAN2, annoValue(an)));
+  if (VS.pending.length) drawAnno(VS.tool, VS.pending, r, VS.tool === 'angle' ? COL_MAN : COL_MAN2, null);
+}
+
+/* ---------- Mesures manuelles ---------- */
 function setTool(t){
-  VS.tool = t; VS.pending = [];
-  $$('#vTools button').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === t));
-  $('#vHint').textContent = hints[t]; $('#vChronoBox').hidden = t !== 'chrono'; draw();
+  VS.tool = VS.tool === t ? null : t; VS.pending = [];
+  $$('#vTools button').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === VS.tool));
+  $('#vHint').textContent = VS.tool ? hints[VS.tool] : 'Choisissez un outil pour mesurer à la main un angle, une inclinaison ou des temps.';
+  $('#vChronoBox').hidden = VS.tool !== 'chrono'; draw();
 }
 $('#vTools').addEventListener('click', e => { const b = e.target.closest('[data-tool]'); if (b) setTool(b.dataset.tool); });
 $('#vUndo').addEventListener('click', () => {
@@ -754,64 +1184,32 @@ $('#vUndo').addEventListener('click', () => {
   else if (VS.pending.length) VS.pending.pop(); else { VS.annos.pop(); renderAnnos(); }
   draw();
 });
-
-/* géométrie : coordonnées normalisées dans l'image réelle (gère le letterbox) */
-function contentRect(){
-  const W = cv.clientWidth, H = cv.clientHeight, vw = vid.videoWidth || 16, vh = vid.videoHeight || 9;
-  const s = Math.min(W / vw, H / vh), cw = vw * s, ch = vh * s;
-  return {x:(W - cw) / 2, y:(H - ch) / 2, w:cw, h:ch, vw, vh};
-}
-function resizeOverlay(){
-  const dpr = window.devicePixelRatio || 1;
-  cv.width = Math.round(cv.clientWidth * dpr); cv.height = Math.round(cv.clientHeight * dpr); draw();
-}
-const toScreen = (p, r) => [r.x + p[0] * r.w, r.y + p[1] * r.h];
-function angleAt(a, b, c, r){
-  const v1 = [(a[0] - b[0]) * r.vw, (a[1] - b[1]) * r.vh], v2 = [(c[0] - b[0]) * r.vw, (c[1] - b[1]) * r.vh];
-  const cos = (v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(...v1) * Math.hypot(...v2) || 1);
-  return Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
-}
+function angleAt(a, b, c, r){ return ang3([a[0] * r.vw, a[1] * r.vh], [b[0] * r.vw, b[1] * r.vh], [c[0] * r.vw, c[1] * r.vh]); }
 function vsVertical(a, b, r){ const dx = (b[0] - a[0]) * r.vw, dy = (b[1] - a[1]) * r.vh; return Math.atan2(Math.abs(dx), Math.abs(dy)) * 180 / Math.PI; }
 function annoValue(an){ const r = contentRect(); return an.type === 'angle' ? angleAt(an.pts[0], an.pts[1], an.pts[2], r) : vsVertical(an.pts[0], an.pts[1], r); }
 const onFrame = an => Math.abs(an.time - vid.currentTime) < 0.6 / fps();
-function draw(){
-  const dpr = window.devicePixelRatio || 1;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
-  if (!vid.videoWidth) return;
-  const r = contentRect(), cA = '#3ddc97', c2 = '#a5a6ff'; // couleurs vives fixes : lisibles sur toute vidéo
-  VS.annos.filter(onFrame).forEach(an => drawAnno(an.type, an.pts, r, an.type === 'angle' ? cA : c2, annoValue(an)));
-  if (VS.pending.length){
-    const type = VS.tool, col = type === 'angle' ? cA : c2;
-    drawAnno(type, VS.pending, r, col, null);
-  }
-}
 function drawAnno(type, pts, r, col, val){
   const P = pts.map(p => toScreen(p, r));
   ctx.lineWidth = 3; ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineCap = 'round';
   ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 4;
   ctx.beginPath(); P.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke();
-  if (type === 'vert' && P.length === 2){
-    ctx.setLineDash([5, 5]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]); ctx.lineTo(P[0][0], P[1][1]); ctx.stroke(); ctx.setLineDash([]);
-  }
+  if (type === 'vert' && P.length === 2){ ctx.setLineDash([5, 5]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]); ctx.lineTo(P[0][0], P[1][1]); ctx.stroke(); ctx.setLineDash([]); }
   if (type === 'angle' && P.length === 3){
     const a1 = Math.atan2(P[0][1] - P[1][1], P[0][0] - P[1][0]), a2 = Math.atan2(P[2][1] - P[1][1], P[2][0] - P[1][0]);
     let d = a2 - a1; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
     ctx.globalAlpha = .25; ctx.beginPath(); ctx.moveTo(P[1][0], P[1][1]); ctx.arc(P[1][0], P[1][1], 26, a1, a1 + d, d < 0); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
   }
   ctx.shadowBlur = 0;
-  P.forEach(p => { ctx.beginPath(); ctx.arc(p[0], p[1], 7, 0, 7); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 3; ctx.stroke(); });
+  P.forEach(p => { ctx.beginPath(); ctx.arc(p[0], p[1], 7, 0, 7); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = col; ctx.stroke(); });
   if (val != null){
-    const at = type === 'angle' ? P[1] : [(P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2];
-    const txt = Math.round(val) + '°' + (type === 'vert' ? ' / vert.' : '');
-    ctx.font = '600 15px system-ui, sans-serif'; const w = ctx.measureText(txt).width + 14;
-    const x = Math.min(cv.clientWidth - w - 4, at[0] + 14), y = Math.max(4, at[1] - 34);
-    ctx.fillStyle = 'rgba(10,12,16,.82)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, 24, 12) : ctx.rect(x, y, w, 24); ctx.fill();
-    ctx.fillStyle = col; ctx.fillText(txt, x + 7, y + 17);
+    const at = type === 'angle' ? P[1] : mid(P[0], P[1]);
+    pill(at[0] + 14, at[1] - 22, Math.round(val) + '°' + (type === 'vert' ? ' / vert.' : ''), col, 'left', 15);
   }
 }
 function hit(e){
   const r = contentRect(), b = cv.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top;
   const cands = [...VS.annos.filter(onFrame).map(an => an.pts), VS.pending];
+  if ($('#vCalib').value === 'points' && !isPan()) cands.push(VS.calib);
   for (const pts of cands) for (let i = 0; i < pts.length; i++){ const s = toScreen(pts[i], r); if (Math.hypot(s[0] - x, s[1] - y) < 22) return {pts, i}; }
   return null;
 }
@@ -820,33 +1218,39 @@ cv.addEventListener('pointerdown', e => {
   if (!vid.videoWidth) return;
   const h = hit(e);
   if (h){ VS.drag = h; cv.setPointerCapture(e.pointerId); return; }
-  if (VS.tool === 'chrono') return;
+  if (VS.tool === 'calib'){
+    VS.calib.push(normPt(e));
+    if (VS.calib.length === 2){ setTool('calib'); recomputeGait(); toast('Repères placés'); }
+    draw(); return;
+  }
+  if (VS.tool !== 'angle' && VS.tool !== 'vert'){ vid.paused ? vid.play() : vid.pause(); return; }
   vid.pause();
   VS.pending.push(normPt(e));
-  const need = VS.tool === 'angle' ? 3 : 2;
-  if (VS.pending.length === need){ VS.annos.push({id: uid(), type: VS.tool, pts: VS.pending, time: vid.currentTime}); VS.pending = []; renderAnnos(); }
+  if (VS.pending.length === (VS.tool === 'angle' ? 3 : 2)){ VS.annos.push({id: uid(), type: VS.tool, pts: VS.pending, time: vid.currentTime}); VS.pending = []; renderAnnos(); }
   draw();
 });
 cv.addEventListener('pointermove', e => { if (!VS.drag) return; VS.drag.pts[VS.drag.i] = normPt(e); draw(); });
-cv.addEventListener('pointerup', () => { if (VS.drag){ VS.drag = null; renderAnnos(); } });
+cv.addEventListener('pointerup', () => { if (!VS.drag) return; const wasCalib = VS.drag.pts === VS.calib; VS.drag = null; renderAnnos(); if (wasCalib) recomputeGait(); });
 function renderAnnos(){
   const rows = VS.annos.slice().sort((a, b) => a.time - b.time).map(an => `<tr>
     <td>${an.type === 'angle' ? 'Angle' : 'Inclinaison / verticale'}</td><td class="r"><b>${Math.round(annoValue(an))}°</b></td>
-    <td class="r">image ${Math.round(an.time * fps())}</td>
+    <td class="r">image ${frameAt(an.time)}</td>
     <td class="r"><button class="icon" data-go="${an.id}">Voir</button> <button class="icon danger" data-x="${an.id}" aria-label="Supprimer">✕</button></td></tr>`).join('');
-  $('#vAnnos').innerHTML = rows ? `<tbody>${rows}</tbody>` : '<tbody><tr><td class="muted">Aucune mesure pour l\'instant.</td></tr></tbody>';
+  $('#vAnnos').innerHTML = rows ? `<tbody>${rows}</tbody>` : '';
 }
 $('#vAnnos').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.go){ const an = VS.annos.find(a => a.id === b.dataset.go); vid.pause(); vid.currentTime = an.time; }
   if (b.dataset.x){ VS.annos = VS.annos.filter(a => a.id !== b.dataset.x); renderAnnos(); draw(); }
 });
-$('#vMark').addEventListener('click', () => { if (!vid.videoWidth) return; vid.pause(); VS.marks.push({label: $('#vMarkLabel').value, time: vid.currentTime}); VS.marks.sort((a, b) => a.time - b.time); renderMarks();
-  const next = {'Pose du pied':'Décollage', 'Décollage':'Pose du pied', 'Départ':'Pose du pied'}[$('#vMarkLabel').value]; if (next) $('#vMarkLabel').value = next; });
+$('#vMark').addEventListener('click', () => {
+  if (!vid.videoWidth) return; vid.pause(); VS.marks.push({label: $('#vMarkLabel').value, time: vid.currentTime}); VS.marks.sort((a, b) => a.time - b.time); renderMarks();
+  const next = {'Pose du pied':'Décollage', 'Décollage':'Pose du pied', 'Départ':'Pose du pied'}[$('#vMarkLabel').value]; if (next) $('#vMarkLabel').value = next;
+});
 function renderMarks(){
   const s = slow(); const t0 = (VS.marks.find(m => m.label === 'Départ') || VS.marks[0] || {time:0}).time;
   $('#vMarks').innerHTML = VS.marks.length ? `<thead><tr><th>Événement</th><th class="r">Image</th><th class="r">Temps réel (s)</th><th class="r">Δ (s)</th><th></th></tr></thead><tbody>` +
-    VS.marks.map((m, i) => `<tr><td>${esc(m.label)}</td><td class="r">${Math.round(m.time * fps())}</td><td class="r"><b>${fmt((m.time - t0) / s, 3)}</b></td>
+    VS.marks.map((m, i) => `<tr><td>${esc(m.label)}</td><td class="r">${frameAt(m.time)}</td><td class="r"><b>${fmt((m.time - t0) / s, 3)}</b></td>
       <td class="r">${i ? fmt((m.time - VS.marks[i - 1].time) / s, 3) : '–'}</td><td class="r"><button class="icon danger" data-mx="${i}" aria-label="Supprimer">✕</button></td></tr>`).join('') + '</tbody>'
     : '<tbody><tr><td class="muted">Aucun événement marqué.</td></tr></tbody>';
   const contact = [], flight = [];
@@ -855,15 +1259,15 @@ function renderMarks(){
     if (a.label === 'Pose du pied' && b.label === 'Décollage') contact.push(dt);
     if (a.label === 'Décollage' && b.label === 'Pose du pied') flight.push(dt);
   }
-  const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
-  $('#vContact').innerHTML = (contact.length ? `Temps de contact moyen : <b>${fmt(avg(contact), 3)} s</b> (${contact.length}) · ` : '') + (flight.length ? `Temps de vol moyen : <b>${fmt(avg(flight), 3)} s</b> (${flight.length})` : '');
+  $('#vContact').innerHTML = (contact.length ? `Temps de contact moyen : <b>${fmt(mean(contact), 3)} s</b> (${contact.length}) · ` : '') + (flight.length ? `Temps de vol moyen : <b>${fmt(mean(flight), 3)} s</b> (${flight.length})` : '');
 }
 $('#vMarks').addEventListener('click', e => { const b = e.target.closest('[data-mx]'); if (b){ VS.marks.splice(+b.dataset.mx, 1); renderMarks(); } });
+syncSettings();
 
 /* ============================================================
    Démarrage
    ============================================================ */
-setTool('angle');
+setTool(null);
 const startTab = LS.get(KEY + '.tab');
 show(views.includes(startTab) ? startTab : 'team');
 </script>
