@@ -313,7 +313,7 @@ dialog .db{padding:16px}
           <label>Précision du modèle<select id="aiModel"><option value="0">Rapide</option><option value="1" selected>Standard</option><option value="2">Précise (plus lente)</option></select></label>
           <label class="fixed-only">Étalonnage<select id="vCalib"><option value="height">Taille de l'athlète</option><option value="points">2 repères au sol</option></select></label>
           <label class="fixed-only calib-height">Taille de l'athlète (m)<input type="text" inputmode="decimal" id="vHeight" value="1,80"></label>
-          <label class="fixed-only calib-points" hidden>Distance entre les repères (m)<input type="text" inputmode="decimal" id="vCalibDist" value="5"></label>
+          <label class="fixed-only calib-points" hidden>Distance entre les repères, de centre à centre (m)<input type="text" inputmode="decimal" id="vCalibDist" value="5"></label>
           <label class="fixed-only calib-points" hidden style="justify-content:flex-end"><button type="button" id="vCalibBtn">Placer les 2 repères</button></label>
           <label class="pan-only" hidden>Vitesse de course (m/s)<input type="text" inputmode="decimal" id="vSpeed" value="9,0"></label>
           <label>Sensibilité de détection d'appui : <output id="vThrOut"></output><input type="range" id="vThr" min="0.02" max="0.15" step="0.005" value="0.06"></label>
