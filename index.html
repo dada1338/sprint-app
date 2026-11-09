@@ -1424,14 +1424,14 @@ function renderGait(){
   const rythme = S.method !== 'appuis';
   $('#gKpis').innerHTML = kpi('Temps de contact', fmt(S.tc, 3), 's', true) + kpi('Temps de vol', fmt(S.flight, 3), 's') +
     kpi(rythme ? 'Fréquence (rythme des jambes)' : 'Fréquence', fmt(S.freq, 2), 'pas/s') + kpi(S.method === 'empreintes' ? 'Longueur de pas (moyenne des empreintes)' : rythme ? 'Longueur de pas (vitesse ÷ fréquence)' : 'Longueur de pas', fmt(S.len, 2), 'm', true) +
-    kpi(G.pan ? 'Vitesse (saisie)' : rythme ? 'Vitesse moyenne (hanches)' : 'Vitesse', fmt(S.speed, 2), 'm/s') + kpi('Appuis détectés', G.contacts.length + (G.reliable ? '' : ' (incertain)'), '');
+    kpi(G.pan ? 'Vitesse (saisie)' : rythme ? 'Vitesse moyenne (hanches)' : 'Vitesse', fmt(S.speed, 2), 'm/s') + (S.method === 'empreintes' ? kpi('Pas mesurés', G.printSteps.filter(s => s.stepT && !s.doubt).length, '') : kpi('Appuis détectés', G.contacts.length + (G.reliable ? '' : ' (incertain)'), ''));
   $('#gSeries').innerHTML = SERIES.map(s => `<button class="chip" data-s="${s.k}" aria-pressed="${VS.series.has(s.k)}"><span class="dot" style="background:${s.color}"></span>${s.label}</button>`).join('');
   renderGaitChart();
   const kn = (c, a) => fmt(c.side === 'G' ? a.kneeL : a.kneeR, 0) + '°';
   $('#gSteps').innerHTML = !G.reliable && G.printSteps && G.printSteps.length ? `<thead><tr><th>#</th><th>Pied</th><th class="r">Instant (s)</th><th class="r">Pas (m)</th><th class="r">Durée du pas (s)</th></tr></thead><tbody>` +
       G.prints.map((p, i) => { const st = i ? G.printSteps[i - 1] : null; return `<tr class="click" data-f="${p.f0}"><td class="muted">${i + 1}</td>
         <td><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.side === 'G' ? COL_L : COL_R};margin-right:6px"></span>${p.side}</td>
-        <td class="r">${fmt(p.t0, 3)}</td><td class="r"><b>${st ? (st.doubt ? '(' + fmt(st.len, 2) + ')' : fmt(st.len, 2)) : 'départ'}</b></td><td class="r">${st && st.stepT ? fmt(st.stepT, 3) : '–'}</td></tr>`; }).join('') + '</tbody>'
+        <td class="r">${fmt(p.t0, 3)}</td><td class="r"><b>${st ? (st.doubt ? '(' + fmt(st.len, 2) + ')' : fmt(st.len, 2)) : (G.printSteps[0] && !G.printSteps[0].stepT ? 'départ' : '–')}</b></td><td class="r">${st && st.stepT ? fmt(st.stepT, 3) : '–'}</td></tr>`; }).join('') + '</tbody>'
     : !G.reliable ? '<tbody><tr><td class="muted" style="white-space:normal">Appuis non mesurables de façon fiable sur cette vidéo (cadence d\'images trop faible ou détection irrégulière). Les moyennes ci-dessus restent valables.</td></tr></tbody>' : G.contacts.length ? `<thead><tr><th>#</th><th>Pied</th><th class="r">Instant (s)</th><th class="r">Contact (s)</th><th class="r">Vol (s)</th><th class="r">Pas (m)</th><th class="r hide-sm">Genou pose</th><th class="r hide-sm">Genou décoll.</th></tr></thead><tbody>` +
     G.steps.map((s, i) => { const c = s.c; return `<tr class="click" data-f="${c.f0}">
       <td class="muted">${i + 1}</td><td><span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c.side === 'G' ? COL_L : COL_R};margin-right:6px"></span>${c.side}</td>
@@ -1495,7 +1495,7 @@ $('#gExport').addEventListener('click', () => {
   if (G.reliable){ L.push('Appuis'); L.push('#;Pied;Instant (s);Contact (s);Vol (s);Pas (m);Genou pose (°);Genou décollage (°)');
     G.steps.forEach((s, i) => { const c = s.c, k = a => c.side === 'G' ? a.kneeL : a.kneeR; L.push([i + 1, c.side, n(c.f0 * G.dt), n(c.tc), n(s.flight), n(s.len, 2), n(k(c.td), 0), n(k(c.to), 0)].join(';')); }); }
   else if (G.prints && G.prints.length){ L.push('Pas (empreintes)'); L.push('#;Pied;Instant (s);Pas (m);Durée du pas (s);Douteux');
-    G.prints.forEach((p, i) => { const s = i ? G.printSteps[i - 1] : null; L.push([i + 1, p.side, n(p.t0), s ? n(s.len, 2) : 'départ', s ? n(s.stepT) : '', s && s.doubt ? 'oui' : ''].join(';')); }); }
+    G.prints.forEach((p, i) => { const s = i ? G.printSteps[i - 1] : null; L.push([i + 1, p.side, n(p.t0), s ? n(s.len, 2) : (G.printSteps[0] && !G.printSteps[0].stepT ? 'départ' : ''), s ? n(s.stepT) : '', s && s.doubt ? 'oui' : ''].join(';')); }); }
   L.push(''); L.push('Images'); L.push('Temps réel (s);Genou G;Genou D;Hanche G;Hanche D;Tronc;Coude G;Coude D;Vitesse (m/s)');
   const sp = new Map((G.speedCurve || []).map(p => [p[0], p[1]]));
   G.rows.forEach(r => { const a = r.ang; L.push([n(r.t), n(a.kneeL, 1), n(a.kneeR, 1), n(a.hipL, 1), n(a.hipR, 1), n(a.trunk, 1), n(a.elbowL, 1), n(a.elbowR, 1), n(sp.get(r.t), 2)].join(';')); });
