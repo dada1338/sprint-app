@@ -1259,7 +1259,7 @@ function renderGait(){
   const notes = [];
   if (!G.pan && !G.scale) notes.push('Longueurs de pas : renseignez l\'étalonnage (taille de l\'athlète ou 2 repères au sol).');
   if (!G.pan && G.scale && $('#vCalib').value === 'height') notes.push('Étalonnage par la taille de l\'athlète : précision ≈ ±5 %. Deux repères au sol donnent un résultat plus précis.');
-  if (G.contacts.some(c => c.cutStart || c.cutEnd)) notes.push('Entre parenthèses : appui coupé par le début ou la fin de la plage analysée (exclu des moyennes).');
+  if (G.reliable && G.contacts.some(c => c.cutStart || c.cutEnd)) notes.push('Entre parenthèses : appui coupé par le début ou la fin de la plage analysée (exclu des moyennes).');
   if (!G.fineTiming) notes.push(`À ${fmt(1 / G.dt, 0)} images/s réelles, un appui ne dure que 2 à 3 images : les temps de contact et de vol ne sont pas mesurables. Filmez en ralenti (120 ou 240 i/s) pour les obtenir.`);
   if (S.method === 'rythme') notes.push('Les appuis image par image étant incertains, fréquence, vitesse et longueur de pas sont calculées sur l\'ensemble de la course (rythme des jambes et déplacement des hanches), une méthode plus robuste.');
   $('#gNote').textContent = notes.join(' ');
