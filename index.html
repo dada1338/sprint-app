@@ -291,10 +291,11 @@ dialog .db{padding:16px}
       <div class="ai-box">
         <div class="row">
           <button class="primary" id="aiRun">Analyser automatiquement</button>
+          <button id="aiTarget">Cibler l'athlète</button>
           <label class="check"><input type="checkbox" id="aiLive"> Suivi en direct</label>
         </div>
         <div class="progress" id="aiProg" hidden><div></div></div>
-        <p class="muted small" id="aiStatus">Un modèle d'IA détecte le squelette image par image, directement sur votre appareil. « Analyser » traite toutes les images pour mesurer les appuis ; « Suivi en direct » affiche le squelette pendant la lecture.</p>
+        <p class="muted small" id="aiStatus">Un modèle d'IA détecte le squelette image par image, directement sur votre appareil. « Analyser » traite toutes les images pour mesurer les appuis ; « Suivi en direct » affiche le squelette pendant la lecture. Athlète petit ou loin dans l'image : touchez « Cibler l'athlète », puis touchez-le sur la vidéo.</p>
         <div class="row" style="margin-top:10px">
           <span class="muted small">Afficher :</span>
           <button class="chip" data-layer="skeleton" aria-pressed="true">Squelette</button>
@@ -883,6 +884,7 @@ const hints = {
   angle: 'Touchez 3 points : extrémité, articulation (sommet de l\'angle), extrémité. Les points se déplacent au doigt.',
   vert: 'Touchez 2 points d\'un segment (ex. hanche puis épaule) : l\'angle par rapport à la verticale s\'affiche.',
   chrono: 'Avancez image par image et marquez les événements à la main : départ, poses et décollages du pied, passages.',
+  target: 'Touchez l\'athlète sur la vidéo : l\'analyse suivra une zone agrandie autour de lui.',
   calib: 'Touchez 2 repères au sol dont vous connaissez l\'écart (plots, lignes). Caméra fixe uniquement.'
 };
 
@@ -891,7 +893,8 @@ function loadVideo(file){
   if (AI.running) AI.cancel = true;
   if (VS.url) URL.revokeObjectURL(VS.url);
   VS.url = URL.createObjectURL(file); vid.src = VS.url;
-  Object.assign(VS, {annos:[], marks:[], pending:[], calib:[], range:null, gait:null, frames:new Map()});
+  Object.assign(VS, {annos:[], marks:[], pending:[], calib:[], range:null, gait:null, frames:new Map(), target:null, roi:null});
+  $('#aiTarget').textContent = 'Cibler l\'athlète';
   if (AI.pose) AI.pose.reset();
   $('#vEmpty').hidden = true; $('#vWork').hidden = false; $('#manualCard').hidden = false; $('#gaitCard').hidden = true;
   renderAnnos(); renderMarks(); renderRange();
@@ -971,14 +974,63 @@ function ensurePose(){
   AI.ready.catch(() => { AI.ready = null; setStatus('Impossible de charger le modèle d\'IA : une connexion internet est nécessaire la première fois.'); });
   return AI.ready;
 }
-function detect(){
+function detect(img = vid){
   return new Promise((res, rej) => {
     let done = false; const fin = r => { if (!done){ done = true; AI.onRes = null; res(r || {}); } };
     AI.onRes = fin;
-    AI.pose.send({image: vid}).then(() => setTimeout(() => fin(null), 30), e => { if (!done){ done = true; AI.onRes = null; rej(e); } });
+    AI.pose.send({image: img}).then(() => setTimeout(() => fin(null), 30), e => { if (!done){ done = true; AI.onRes = null; rej(e); } });
   });
 }
 function pack(lm){ if (!lm) return null; const a = new Float32Array(99); lm.forEach((p, i) => { a[i * 3] = p.x; a[i * 3 + 1] = p.y; a[i * 3 + 2] = p.visibility ?? 1; }); return a; }
+/* ---------- Zone suivie : l'athlète petit dans l'image est recadré et agrandi avant la détection ---------- */
+const roiCv = document.createElement('canvas'); roiCv.width = roiCv.height = 512;
+const roiCtx = roiCv.getContext('2d');
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+function resetRoi(){
+  const vh = vid.videoHeight, vw = vid.videoWidth;
+  VS.roi = VS.target ? {cx: VS.target.x * vw, cy: VS.target.y * vh, side: 0.35 * vh, vx: 0, vy: 0, miss: 0, last: null, lastF: null, size: 0, heights: []} : null;
+  if (AI.pose){ AI.pose.setOptions({smoothLandmarks: !VS.roi}); AI.pose.reset(); }
+}
+async function detectFrame(){
+  if (!VS.roi){ const r = await detect(vid); return pack(r.poseLandmarks); }
+  const vw = vid.videoWidth, vh = vid.videoHeight, R = VS.roi;
+  const sd = Math.min(R.side, vw, vh), sx = clamp(R.cx - sd / 2, 0, vw - sd), sy = clamp(R.cy - sd / 2, 0, vh - sd);
+  R.box = [sx, sy, sd];
+  roiCtx.drawImage(vid, sx, sy, sd, sd, 0, 0, 512, 512);
+  const a = pack((await detect(roiCv)).poseLandmarks);
+  if (a) for (let i = 0; i < 33; i++){ a[i * 3] = (sx + a[i * 3] * sd) / vw; a[i * 3 + 1] = (sy + a[i * 3 + 1] * sd) / vh; }
+  return a;
+}
+/* squelette crédible ? (les fausses détections ont des jambes quasi invisibles) */
+function plausible(a){ return !!a && [23, 24, 25, 26, 27, 28].reduce((x, i) => x + a[i * 3 + 2], 0) / 6 >= 0.35; }
+/* recentre la zone sur les hanches, anticipe le déplacement et rejette les détections incohérentes ; renvoie le squelette retenu */
+function followRoi(a, f){
+  const R = VS.roi; if (!R) return plausible(a) ? a : null;
+  const vw = vid.videoWidth, vh = vid.videoHeight;
+  let ok = plausible(a), hip, h;
+  if (ok){
+    hip = [(a[69] + a[72]) / 2 * vw, (a[70] + a[73]) / 2 * vh];
+    let y0 = Infinity, y1 = -Infinity; for (let i = 11; i < 33; i++){ y0 = Math.min(y0, a[i * 3 + 1] * vh); y1 = Math.max(y1, a[i * 3 + 1] * vh); }
+    h = y1 - y0;
+    if (R.size && (h > 1.8 * R.size || h < 0.45 * R.size)) ok = false;                                     // taille incohérente
+    if (R.last && Math.hypot(hip[0] - R.cx, hip[1] - (R.cy + 0.1 * R.size)) > 1.2 * R.size) ok = false;   // saut de position
+  }
+  if (!ok){
+    R.miss++;
+    if (R.miss <= 15){ R.cx += R.vx; R.cy += R.vy; R.side = Math.min(R.side * 1.12, 0.6 * vh, vw); }
+    if (R.miss > 3) AI.pose.reset();
+    return null;
+  }
+  if (R.last){   // vitesse par image traitée (l'analyse peut aller vers l'avant ou vers l'arrière)
+    const gap = Math.max(1, Math.abs(f - R.lastF));
+    R.vx = 0.5 * R.vx + 0.5 * (hip[0] - R.last[0]) / gap; R.vy = 0.5 * R.vy + 0.5 * (hip[1] - R.last[1]) / gap;
+  }
+  R.heights.push(h); if (R.heights.length > 7) R.heights.shift();
+  R.size = median(R.heights); R.last = hip; R.lastF = f; R.miss = 0;
+  R.cx = hip[0] + R.vx; R.cy = hip[1] - 0.1 * R.size + R.vy;
+  R.side = clamp(2.6 * R.size, 0.12 * vh, Math.min(vw, vh));
+  return a;
+}
 function seekTo(t){ return new Promise(res => { let done = false; const fin = () => { if (done) return; done = true; vid.removeEventListener('seeked', fin); res(); }; vid.addEventListener('seeked', fin); setTimeout(fin, 2500); vid.currentTime = t; }); }
 function prepFrames(){ if (VS.framesFps !== fps()){ VS.frames = new Map(); VS.framesFps = fps(); } }
 
@@ -992,12 +1044,20 @@ async function analyzeAll(){
   const F = fps(), nMax = Math.max(1, Math.floor((vid.duration || 0) * F));
   const [a, b] = VS.range || [0, vid.duration];
   const f0 = Math.max(0, frameAt(a)), f1 = Math.min(nMax - 1, frameAt(b)), tot = f1 - f0 + 1, t0 = performance.now();
-  AI.pose.reset();
-  for (let f = f0; f <= f1 && !AI.cancel; f++){
+  // avec un athlète ciblé : on part de l'image ciblée vers la fin, puis on repart de l'image ciblée vers le début
+  const order = [];
+  if (VS.target){ const ft = clamp(frameAt(VS.target.t), f0, f1); for (let f = ft; f <= f1; f++) order.push(f); order.push(-1); for (let f = ft - 1; f >= f0; f--) order.push(f); }
+  else for (let f = f0; f <= f1; f++) order.push(f);
+  resetRoi();
+  let done = 0;
+  for (const f of order){
+    if (AI.cancel) break;
+    if (f < 0){ resetRoi(); continue; }
     await seekTo((f + 0.5) / F);
-    try { const r = await detect(); VS.frames.set(f, pack(r.poseLandmarks)); } catch (e) { VS.frames.set(f, null); }
-    AI.lastF = f;
-    const done = f - f0 + 1;
+    let lm = null;
+    try { lm = await detectFrame(); } catch (e) {}
+    lm = followRoi(lm, f); VS.frames.set(f, lm);
+    AI.lastF = f; done++;
     $('#aiProg div').style.width = (done / tot * 100) + '%';
     if (done % 4 === 0 || done === tot){
       const left = (performance.now() - t0) / done * (tot - done) / 1000;
@@ -1007,19 +1067,27 @@ async function analyzeAll(){
   }
   AI.running = false; $('#aiRun').textContent = 'Analyser automatiquement'; $('#aiProg').hidden = true;
   const nOk = [...VS.frames.values()].filter(Boolean).length;
-  setStatus((AI.cancel ? 'Analyse interrompue' : 'Analyse terminée') + ` : squelette détecté sur ${nOk} image${nOk > 1 ? 's' : ''}.` + (nOk ? '' : ' Vérifiez que l\'athlète est entièrement visible.'));
+  VS.roi = null;
+  setStatus((AI.cancel ? 'Analyse interrompue' : 'Analyse terminée') + ` : squelette détecté sur ${nOk} image${nOk > 1 ? 's' : ''} sur ${done}.` +
+    (nOk < done / 3 && !VS.target ? ' Si l\'athlète est petit dans l\'image, touchez « Cibler l\'athlète », touchez-le sur la vidéo, puis relancez.' : nOk ? '' : ' Vérifiez que l\'athlète est visible.'));
   recomputeGait(); draw();
   if (VS.gait) $('#gaitCard').scrollIntoView({behavior:'smooth', block:'start'});
 }
 $('#aiRun').addEventListener('click', analyzeAll);
+$('#aiTarget').addEventListener('click', () => {
+  if (!vid.videoWidth) return;
+  vid.pause(); setTool('target');
+  setStatus(VS.tool === 'target' ? 'Placez la vidéo sur une image où l\'athlète est visible, puis touchez-le.' : 'Ciblage annulé.');
+  $('#stage').scrollIntoView({behavior:'smooth', block:'center'});
+});
 
 function liveDetect(t){
   if (!AI.pose || AI.busy || AI.running) return;
   prepFrames();
   const f = frameAt(t); if (VS.frames.has(f)) return;
-  if (Math.abs(f - AI.lastF) > 3) AI.pose.reset();    // saut dans la vidéo : pas de lissage avec l'ancienne position
+  if (Math.abs(f - AI.lastF) > 3 || (VS.target && !VS.roi)) resetRoi();    // saut dans la vidéo : on repart de zéro
   AI.busy = true; AI.lastF = f;
-  detect().then(r => { VS.frames.set(f, pack(r.poseLandmarks)); }).catch(() => {}).finally(() => { AI.busy = false; draw(); scheduleGait(); });
+  detectFrame().then(lm => { VS.frames.set(f, followRoi(lm, f)); }).catch(() => {}).finally(() => { AI.busy = false; draw(); scheduleGait(); });
 }
 function liveStart(){
   if (!$('#aiLive').checked) return;
@@ -1270,6 +1338,14 @@ function draw(){
   const r = contentRect(), f = frameAt(vid.currentTime), a = curLandmarks();
   const hud = [];
   if (VS.layers.steps){ const ph = drawSteps(r, f); if (ph) hud.push(ph); }
+  if (AI.running && VS.roi && VS.roi.box){   // zone suivie pendant l'analyse
+    const [sx, sy, sd] = VS.roi.box, A = pxToScreen(sx, sy, r), B = pxToScreen(sx + sd, sy + sd, r);
+    ctx.setLineDash([6, 5]); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.strokeRect(A[0], A[1], B[0] - A[0], B[1] - A[1]); ctx.setLineDash([]);
+  }
+  if (VS.target && !AI.running && Math.abs(VS.target.t - vid.currentTime) < 0.6 / fps()){   // athlète ciblé
+    const [x, y] = toScreen([VS.target.x, VS.target.y], r);
+    ctx.strokeStyle = COL_CAL; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(x, y, 18, 0, 7); ctx.moveTo(x - 26, y); ctx.lineTo(x - 10, y); ctx.moveTo(x + 10, y); ctx.lineTo(x + 26, y); ctx.moveTo(x, y - 26); ctx.lineTo(x, y - 10); ctx.moveTo(x, y + 10); ctx.lineTo(x, y + 26); ctx.stroke();
+  }
   if (a && VS.layers.skeleton) drawSkeleton(a, r);
   if (a && VS.layers.angles) hud.push(...drawAngles(a, r));
   drawHud(hud);
@@ -1325,6 +1401,10 @@ cv.addEventListener('pointerdown', e => {
   if (!vid.videoWidth) return;
   const h = hit(e);
   if (h){ VS.drag = h; cv.setPointerCapture(e.pointerId); return; }
+  if (VS.tool === 'target'){
+    const q = normPt(e); VS.target = {t: vid.currentTime, x: q[0], y: q[1]}; setTool('target');
+    $('#aiTarget').textContent = 'Athlète ciblé ✓'; setStatus('Athlète ciblé. Lancez « Analyser automatiquement ».'); draw(); return;
+  }
   if (VS.tool === 'calib'){
     VS.calib.push(normPt(e));
     if (VS.calib.length === 2){ setTool('calib'); recomputeGait(); toast('Repères placés'); }
