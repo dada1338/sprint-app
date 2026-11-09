@@ -310,7 +310,7 @@ dialog .db{padding:16px}
           <label>Images/s du fichier<select id="vFps"><option>24</option><option>25</option><option selected>30</option><option>50</option><option>60</option><option>120</option><option>240</option></select></label>
           <label>Ralenti enregistré<select id="vSlow"><option value="1">Non (temps réel)</option><option value="2">2× (60 → 30)</option><option value="4">4× (120 → 30)</option><option value="8">8× (240 → 30)</option></select></label>
           <label>Caméra<select id="vCam"><option value="fixed">Fixe (sur pied)</option><option value="pan">Suit l'athlète</option></select></label>
-          <label>Précision du modèle<select id="aiModel"><option value="0">Rapide</option><option value="1" selected>Standard</option><option value="2">Précise (plus lente)</option></select></label>
+          <label>Précision du modèle<select id="aiModel"><option value="0">Rapide (≈ 3 Mo)</option><option value="1">Standard (≈ 7 Mo)</option><option value="2" selected>Précise (≈ 28 Mo, recommandé)</option></select></label>
           <label class="fixed-only">Étalonnage<select id="vCalib"><option value="height">Taille de l'athlète</option><option value="points">2 repères au sol</option></select></label>
           <label class="fixed-only calib-height">Taille de l'athlète (m)<input type="text" inputmode="decimal" id="vHeight" value="1,80"></label>
           <label class="fixed-only calib-points" hidden>Distance entre les repères, de centre à centre (m)<input type="text" inputmode="decimal" id="vCalibDist" value="5"></label>
@@ -967,7 +967,7 @@ function loadScript(src){ return new Promise((res, rej) => { const s = document.
 function ensurePose(){
   if (AI.ready) return AI.ready;
   AI.ready = (async () => {
-    setStatus('Chargement du modèle d\'IA (une seule fois)…');
+    setStatus('Chargement du modèle d\'IA (une seule fois, jusqu\'à 30 Mo selon la précision choisie)…');
     if (!window.Pose) await loadScript(MP_BASE + 'pose.js');
     const pose = new window.Pose({locateFile: f => MP_BASE + f});
     pose.setOptions({modelComplexity: +$('#aiModel').value, smoothLandmarks: true, enableSegmentation: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5});

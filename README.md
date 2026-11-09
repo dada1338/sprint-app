@@ -12,12 +12,23 @@ Application web (un seul fichier `index.html`, aucune dépendance) pour mesurer,
   - *Objectif → vitesse requise* : course modèle 100 m pour un objectif de temps (réaction, τ, perte de vitesse en fin de course) :
   vitesse max requise, temps de passage tous les 10 m, courbes des temps voisins, comparaison avec une séance enregistrée.
 - **Vidéo** : suivi automatique du squelette par IA (MediaPipe Pose, exécuté sur l'appareil) :
+  - repérage automatique de l'athlète par le mouvement (caméra fixe), ou ciblage manuel ; un athlète petit ou loin
+    est suivi dans une zone agrandie, recherchée à plusieurs échelles ;
+  - nettoyage des trajectoires : correction des inversions gauche/droite, suppression des points aberrants, lissage ;
   - angles en direct sur la vidéo (genoux, hanches, tronc, coudes) et courbes des angles au fil du temps ;
-  - détection automatique des appuis : temps de contact, temps de vol, fréquence, longueur de pas, vitesse ;
-  - affichage des appuis et des longueurs de pas directement sur l'image (caméra fixe) ;
+  - appuis : temps de contact et de vol (ralenti ≥ 100 i/s et athlète assez grand à l'image), fréquence, longueur de pas,
+    vitesse et courbe de vitesse au fil du temps ;
+  - longueur de chaque pas par les « empreintes » (positions des pieds plantés), même quand les temps de contact ne sont
+    pas mesurables ; pas douteux signalés ; méthode de secours par le rythme des jambes à 30 i/s ;
+  - garde-fous : temps de contact masqués s'ils ne sont pas fiables, suggestion du facteur de ralenti si la fréquence
+    mesurée est impossible ;
   - étalonnage par la taille de l'athlète ou par 2 repères au sol ; caméra qui suit l'athlète : longueur = vitesse × temps de pas ;
   - prise en charge des ralentis (2×/4×/8×), lecture image par image, mesures manuelles (angle, inclinaison, chrono).
 
-  Le modèle (≈ 10 Mo) est chargé depuis cdn.jsdelivr.net à la première analyse ; une connexion internet est donc nécessaire la première fois.
+  Conseils de tournage : caméra fixe, de profil, athlète d'au moins un tiers de la hauteur de l'image, ralenti 120 ou
+  240 i/s, deux plots à distance connue (de centre à centre) dans le champ.
+
+  Le modèle (≈ 28 Mo en précision « Précise », par défaut ; 3 à 7 Mo en « Rapide » ou « Standard ») est chargé depuis
+  cdn.jsdelivr.net à la première analyse ; une connexion internet est donc nécessaire la première fois.
 
 Les données sont stockées dans le navigateur (`localStorage`) ; les vidéos ne quittent jamais l'appareil.
