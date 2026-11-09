@@ -1021,8 +1021,10 @@ function followRoi(a, f){
   let ok = plausible(a), hip, h;
   if (ok){
     hip = [(a[69] + a[72]) / 2 * vw, (a[70] + a[73]) / 2 * vh];
-    let y0 = Infinity, y1 = -Infinity; for (let i = 11; i < 33; i++){ y0 = Math.min(y0, a[i * 3 + 1] * vh); y1 = Math.max(y1, a[i * 3 + 1] * vh); }
-    h = y1 - y0;
+    // taille = plus grande dimension du squelette (un athlète accroupi est plus large que haut)
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let i = 11; i < 33; i++){ x0 = Math.min(x0, a[i * 3] * vw); x1 = Math.max(x1, a[i * 3] * vw); y0 = Math.min(y0, a[i * 3 + 1] * vh); y1 = Math.max(y1, a[i * 3 + 1] * vh); }
+    h = Math.max(y1 - y0, x1 - x0);
     if (R.size && (h > 1.8 * R.size || h < 0.45 * R.size)) ok = false;                                     // taille incohérente
     if (R.last && Math.hypot(hip[0] - R.cx, hip[1] - (R.cy + 0.1 * R.size)) > 1.2 * R.size) ok = false;   // saut de position
   }
@@ -1039,7 +1041,7 @@ function followRoi(a, f){
   R.heights.push(h); if (R.heights.length > 7) R.heights.shift();
   R.size = median(R.heights); R.last = hip; R.lastF = f; R.miss = 0;
   R.cx = hip[0] + R.vx; R.cy = hip[1] - 0.1 * R.size + R.vy;
-  R.side = clamp(2.6 * R.size, 0.12 * vh, Math.min(vw, vh));
+  R.side = clamp(3 * R.size, 0.14 * vh, Math.min(vw, vh));
   return a;
 }
 function seekTo(t){ return new Promise(res => { let done = false; const fin = () => { if (done) return; done = true; vid.removeEventListener('seeked', fin); res(); }; vid.addEventListener('seeked', fin); setTimeout(fin, 2500); vid.currentTime = t; }); }
