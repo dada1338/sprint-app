@@ -335,6 +335,11 @@ dialog .db{padding:16px}
     <div class="row" id="gSeries"></div>
     <div id="gChart" style="margin-top:8px;cursor:pointer"></div>
     <p class="muted small" style="margin:6px 0 0">Bandes colorées (si mesurables) : appuis au sol, G ou D. Touchez le graphique pour aller à cet instant de la vidéo.</p>
+    <div id="gSpeedBox" hidden>
+      <h3>Vitesse au fil du temps</h3>
+      <p class="small" id="gSpeedTxt" style="margin:0 0 6px"></p>
+      <div id="gSpeed"></div>
+    </div>
     <h3>Appuis</h3>
     <div class="tablewrap"><table id="gSteps"></table></div>
     <p class="muted small" id="gNote"></p>
@@ -986,9 +991,47 @@ function pack(lm){ if (!lm) return null; const a = new Float32Array(99); lm.forE
 const roiCv = document.createElement('canvas'); roiCv.width = roiCv.height = 512;
 const roiCtx = roiCv.getContext('2d');
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+/* Repérage automatique de l'athlète (caméra fixe) : fond = médiane de 12 images de la plage,
+   l'athlète = plus grande zone qui diffère du fond. Évite d'avoir à le toucher sur la vidéo. */
+async function autoTarget(f0, f1){
+  const vw = vid.videoWidth, vh = vid.videoHeight, w = 160, h = Math.max(40, Math.round(160 * vh / vw)), K = 12;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const cx = c.getContext('2d', {willReadFrequently: true}), imgs = [], fr = [];
+  for (let k = 0; k < K; k++){
+    const f = Math.round(f0 + (f1 - f0) * (k + 0.5) / K);
+    await seekTo((f + 0.5) / fps()); cx.drawImage(vid, 0, 0, w, h);
+    const d = cx.getImageData(0, 0, w, h).data, g = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+    imgs.push(g); fr.push(f);
+  }
+  const bg = new Float32Array(w * h), tmp = new Float32Array(K);
+  for (let i = 0; i < w * h; i++){ for (let k = 0; k < K; k++) tmp[k] = imgs[k][i]; tmp.sort(); bg[i] = tmp[K >> 1]; }
+  let best = null;
+  imgs.forEach((g, k) => {
+    const m = new Uint8Array(w * h); for (let i = 0; i < w * h; i++) m[i] = Math.abs(g[i] - bg[i]) > 28 ? 1 : 0;
+    const seen = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++){
+      if (!m[i] || seen[i]) continue;
+      // composante connexe (8-voisins) par parcours en largeur
+      const q = [i]; seen[i] = 1; let n = 0, x0 = w, x1 = 0, y0 = h, y1 = 0;
+      while (q.length){
+        const j = q.pop(), x = j % w, y = (j / w) | 0; n++;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++){
+          const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+          const jj = yy * w + xx; if (m[jj] && !seen[jj]){ seen[jj] = 1; q.push(jj); }
+        }
+      }
+      // une silhouette est plus haute que large (ou presque) et pas collée à toute l'image
+      const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+      if (n >= 6 && bh >= 0.6 * bw && bh < 0.9 * h && (!best || n > best.n)) best = {n, f: fr[k], x: (x0 + x1 + 1) / 2 / w, y: (y0 + y1 + 1) / 2 / h, hgt: bh / h * vh};
+    }
+  });
+  return best ? {t: (best.f + 0.5) / fps(), x: best.x, y: best.y, side: clamp(3 * best.hgt, 0.14 * vh, Math.min(vw, vh)), auto: true} : null;
+}
 function resetRoi(){
   const vh = vid.videoHeight, vw = vid.videoWidth;
-  VS.roi = VS.target ? {cx: VS.target.x * vw, cy: VS.target.y * vh, side: 0.35 * vh, vx: 0, vy: 0, miss: 0, last: null, lastF: null, size: 0, heights: []} : null;
+  VS.roi = VS.target ? {cx: VS.target.x * vw, cy: VS.target.y * vh, side: VS.target.side || 0.35 * vh, vx: 0, vy: 0, miss: 0, last: null, lastF: null, size: 0, heights: []} : null;
   if (AI.pose){ AI.pose.setOptions({smoothLandmarks: !VS.roi}); AI.pose.reset(); }
 }
 async function detectFrame(){
@@ -1057,6 +1100,12 @@ async function analyzeAll(){
   const F = fps(), nMax = Math.max(1, Math.floor((vid.duration || 0) * F));
   const [a, b] = VS.range || [0, vid.duration];
   const f0 = Math.max(0, frameAt(a)), f1 = Math.min(nMax - 1, frameAt(b)), tot = f1 - f0 + 1, t0 = performance.now();
+  // sans cible et caméra fixe : repérage automatique de l'athlète par le mouvement
+  if ((!VS.target || VS.target.auto) && !isPan() && !window.SL_NOAUTO){
+    setStatus('Repérage de l\'athlète…');
+    const at = await autoTarget(f0, f1);
+    if (at){ VS.target = at; $('#aiTarget').textContent = 'Athlète repéré auto ✓'; }
+  }
   // avec un athlète ciblé : on part de l'image ciblée vers la fin, puis on repart de l'image ciblée vers le début
   const order = [];
   if (VS.target){ const ft = clamp(frameAt(VS.target.t), f0, f1); for (let f = ft; f <= f1; f++) order.push(f); order.push(-1); for (let f = ft - 1; f >= f0; f--) order.push(f); }
@@ -1155,8 +1204,8 @@ function scaleMPerPx(rows){
 }
 const slope = (xs, ys) => { const mx = mean(xs), my = mean(ys); let n = 0, d = 0; xs.forEach((x, i) => { n += (x - mx) * (ys[i] - my); d += (x - mx) ** 2; }); return d ? n / d : NaN; };
 /* Fréquence de pas par autocorrélation de l'écart horizontal entre les chevilles (une période = un pas) */
-function cadence(rows, dt){
-  const f0 = rows[0].f, f1 = rows[rows.length - 1].f; if (f1 - f0 < 0.6 / dt) return null;
+function cadence(rows, dt, wide){   // wide : recherche sur toute la plage (détection d'un mauvais facteur de ralenti)
+  const f0 = rows[0].f, f1 = rows[rows.length - 1].f; if (f1 - f0 < (wide ? 12 : 0.6 / dt)) return null;
   const sig = []; let j = 0;
   for (let f = f0; f <= f1; f++){
     while (rows[j + 1] && rows[j + 1].f <= f) j++;
@@ -1165,7 +1214,7 @@ function cadence(rows, dt){
   }
   const m = mean(sig), x = sig.map(v => v - m), n = x.length, den = x.reduce((t, v) => t + v * v, 0) || 1;
   const ac = L => { let t = 0; for (let i = 0; i + L < n; i++) t += x[i] * x[i + L]; return t / den * n / (n - L); };
-  const lo = Math.max(2, Math.floor(0.15 / dt)), hi = Math.min(n - 4, Math.ceil(0.45 / dt));
+  const lo = wide ? 3 : Math.max(2, Math.floor(0.15 / dt)), hi = wide ? Math.min(n - 4, Math.floor(n / 2)) : Math.min(n - 4, Math.ceil(0.45 / dt));
   if (hi <= lo) return null;
   const v = {}; for (let L = lo - 1; L <= hi + 1; L++) v[L] = ac(L);
   const peaks = []; for (let L = lo; L <= hi; L++) if (v[L] >= v[L - 1] && v[L] >= v[L + 1]) peaks.push(L);
@@ -1179,12 +1228,12 @@ function cadence(rows, dt){
 /* Empreintes : moments où un pied ne bouge plus horizontalement (caméra fixe). Indépendant de l'étiquette G/D,
    qui s'inverse parfois, et du bruit vertical : fonctionne même si l'athlète est petit à l'image. */
 function footprints(rows, dt, legMed){
-  const K = Math.max(1, Math.round(0.02 / dt)), pts = [];
+  const K = Math.max(1, Math.round(0.04 / dt)), pts = [];   // fenêtre ±0,04 s : robuste au tremblement d'un petit athlète
   for (const side of [0, 1]) for (let i = 0; i < rows.length; i++){
     const lo = Math.max(0, i - K), hi = Math.min(rows.length - 1, i + K);
     if (hi - lo < 2 || rows[hi].f - rows[lo].f > 3 * (hi - lo)) continue;
     const ts = [], xs = []; for (let j = lo; j <= hi; j++){ ts.push(rows[j].t); xs.push(rows[j].fx[side]); }
-    if (Math.abs(slope(ts, xs)) / legMed < 1.0) pts.push({t: rows[i].t, f: rows[i].f, x: rows[i].fx[side], y: rows[i].fy[side], side});
+    if (Math.abs(slope(ts, xs)) / legMed < 1.5) pts.push({t: rows[i].t, f: rows[i].f, x: rows[i].fx[side], y: rows[i].fy[side], side});
   }
   pts.sort((a, b) => a.t - b.t);
   const groups = [];
@@ -1193,7 +1242,7 @@ function footprints(rows, dt, legMed){
     if (!g){ g = {pts: [], t0: p.t, t1: p.t, xm: p.x}; groups.push(g); }
     g.pts.push(p); g.t1 = Math.max(g.t1, p.t); g.xm = median(g.pts.map(q => q.x));
   });
-  const fine = 1 / dt >= 100, minPts = fine ? 3 : 2, minDur = fine ? 0.03 : 0.99 * dt;
+  const fine = 1 / dt >= 100, minPts = fine ? 3 : 2, minDur = fine ? 0.02 : 0.99 * dt;
   let prints = groups.filter(g => g.pts.length >= minPts && g.t1 - g.t0 >= minDur).map(g => ({
     t0: g.t0, f0: Math.min(...g.pts.map(q => q.f)), x: g.xm, y: median(g.pts.map(q => q.y)),
     side: g.pts.filter(q => q.side === 0).length * 2 >= g.pts.length ? 'G' : 'D'})).sort((a, b) => a.t0 - b.t0);
@@ -1202,11 +1251,62 @@ function footprints(rows, dt, legMed){
   prints.forEach(p => { const last = kept[kept.length - 1]; if (!last || (p.x - last.x) * dir > 0.25 * legMed || p.t0 - last.t0 < 0.05) kept.push(p); });
   return kept;
 }
+/* ---------- Nettoyage des trajectoires détectées ----------
+   1) inversions gauche/droite (fréquentes de profil) : chaque image est comparée à la position prévue
+      à partir des deux images précédentes (vitesse constante) ; si l'échange G/D colle mieux, on échange ;
+   2) points aberrants : filtre de Hampel (écart à la médiane locale) ;
+   3) lissage de Savitzky-Golay, d'autant plus fort que la cadence réelle est élevée (aucun à 30 i/s). */
+const SWAP_SETS = {legs: [[23, 24], [25, 26], [27, 28], [29, 30], [31, 32]], arms: [[11, 12], [13, 14], [15, 16]]};
+const SWAP_COST = {legs: [[25, 26], [27, 28], [29, 30], [31, 32]], arms: [[13, 14], [15, 16]]};
+const CLEAN_IDX = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+function cleanFrames(src, dt){
+  const vw = vid.videoWidth, vh = vid.videoHeight;
+  const fs = [...src.keys()].filter(f => src.get(f)).sort((a, b) => a - b);
+  const out = new Map(); fs.forEach(f => out.set(f, Float32Array.from(src.get(f))));
+  if (window.SL_NOCLEAN || fs.length < 5) return out;
+  const swap = (a, pairs) => pairs.forEach(([l, r]) => { for (let k = 0; k < 3; k++){ const t = a[l * 3 + k]; a[l * 3 + k] = a[r * 3 + k]; a[r * 3 + k] = t; } });
+  const P = (a, i) => [a[i * 3] * vw, a[i * 3 + 1] * vh];
+  for (const g of ['legs', 'arms']){
+    for (let i = 1; i < fs.length; i++){
+      const f = fs[i], f1 = fs[i - 1]; if (f - f1 > 3) continue;
+      const cur = out.get(f), p1 = out.get(f1), f2 = fs[i - 2], p2 = f2 != null && f1 - f2 <= 3 ? out.get(f2) : null;
+      const pred = j => { const a = P(p1, j); if (!p2) return a; const b = P(p2, j), k = (f - f1) / (f1 - f2); return [a[0] + (a[0] - b[0]) * k, a[1] + (a[1] - b[1]) * k]; };
+      let same = 0, sw = 0;
+      SWAP_COST[g].forEach(([l, r]) => { const pl = pred(l), pr = pred(r), cl = P(cur, l), cr = P(cur, r);
+        same += dist(cl, pl) + dist(cr, pr); sw += dist(cr, pl) + dist(cl, pr); });
+      if (sw < 0.7 * same) swap(cur, SWAP_SETS[g]);
+    }
+  }
+  // longueur de jambe (px) pour les seuils
+  const legs = fs.map(f => { const a = out.get(f); return Math.max(dist(P(a, 23), P(a, 25)) + dist(P(a, 25), P(a, 27)), dist(P(a, 24), P(a, 26)) + dist(P(a, 26), P(a, 28))); });
+  const leg = median(legs) || 1;
+  const hh = Math.max(1, Math.round(0.015 / dt)), m = Math.round(0.012 / dt);
+  const sg = m >= 1 ? Array.from({length: 2 * m + 1}, (_, k) => { const j = k - m; return (3 * (3 * m * m + 3 * m - 1) - 15 * j * j) / ((2 * m + 1) * (4 * m * m + 4 * m - 3)); }) : null;
+  // séquences d'images consécutives (trous ≤ 2 images)
+  const runs = []; let run = [fs[0]];
+  for (let i = 1; i < fs.length; i++){ if (fs[i] - fs[i - 1] <= 2) run.push(fs[i]); else { runs.push(run); run = [fs[i]]; } }
+  runs.push(run);
+  for (const r of runs){
+    if (r.length < 3) continue;
+    for (const i of CLEAN_IDX) for (const c of [0, 1]){
+      const sc = c ? vh : vw, v = r.map(f => out.get(f)[i * 3 + c] * sc), w = v.slice();
+      for (let j = 0; j < v.length; j++){   // Hampel
+        const win = v.slice(Math.max(0, j - hh), Math.min(v.length, j + hh + 1)).sort((a, b) => a - b), med = win[win.length >> 1];
+        const mad = win.map(x => Math.abs(x - med)).sort((a, b) => a - b)[win.length >> 1];
+        if (Math.abs(v[j] - med) > Math.max(0.12 * leg, 4 * 1.4826 * mad)) w[j] = med;
+      }
+      let z = w;
+      if (sg && w.length > 2 * m + 1){ z = w.map((x, j) => { if (j < m || j >= w.length - m) return x; let t = 0; for (let k = -m; k <= m; k++) t += sg[k + m] * w[j + k]; return t; }); }
+      r.forEach((f, j) => { out.get(f)[i * 3 + c] = z[j] / sc; });
+    }
+  }
+  return out;
+}
 function computeGait(){
   if (!vid.videoWidth || VS.framesFps !== fps()) return null;
-  const dt = dtReal(), rows = [];
-  [...VS.frames.keys()].sort((x, y) => x - y).forEach(f => {
-    const a = VS.frames.get(f); if (!a) return;
+  const dt = dtReal(), rows = [], src = cleanFrames(VS.frames, dt);
+  [...src.keys()].sort((x, y) => x - y).forEach(f => {
+    const a = src.get(f); if (!a) return;
     const g = i => lmPx(a, i);
     const foot = (he, to, side) => { const H = g(he), T = g(to); return {y: Math.max(H[1], T[1]), x: (H[0] + T[0]) / 2, side}; };
     const fl = foot(29, 31, 'G'), fr = foot(30, 32, 'D');
@@ -1235,7 +1335,8 @@ function computeGait(){
   const contacts = groups.filter(g => g.rows.length >= 2).map(g => {
     const rs = g.rows, nG = rs.filter(r => r.low.side === 'G').length;
     // bornes affinées : pose et décollage = images où le pied est à moins d'un tiers du seuil de son point le plus bas
-    const gy = Math.max(...rs.map(r => r.low.y)), core = rs.filter(r => r.low.y >= gy - thr / 3);
+    const ys = rs.map(r => r.low.y).sort((a, b) => a - b), gy = ys[Math.min(ys.length - 1, Math.floor(ys.length * 0.6))];   // niveau robuste au bruit (le max est tiré par le bruit)
+    const core = rs.filter(r => r.low.y >= gy - thr / 3);
     const f0 = core[0].f, f1 = core[core.length - 1].f;
     return {f0, f1, side: nG * 2 >= rs.length ? 'G' : 'D', x: median(core.map(r => r.low.x)), y: median(core.map(r => r.low.y)),
       tc: (f1 - f0 + 1) * dt, cutStart: rs[0].f <= first + 1, cutEnd: rs[rs.length - 1].f >= last - 1, td: core[0].ang, to: core[core.length - 1].ang};
@@ -1263,7 +1364,7 @@ function computeGait(){
     method: 'appuis'
   };
   // Vidéo en vitesse normale ou appuis trop irréguliers : méthode robuste par le rythme des jambes
-  const cad = cadence(rows, dt), duration = (last - first + 1) * dt;
+  const cad = cadence(rows, dt), cadW = cadence(rows, dt, true), duration = (last - first + 1) * dt;
   const fineTiming = 1 / dt >= 100;
   // garde-fous : athlète trop petit à l'image (jambe < 60 px) ou temps de contact physiologiquement impossibles
   const tooSmall = legMed < 60;
@@ -1286,11 +1387,23 @@ function computeGait(){
     const sts = printSteps.filter(s => s.stepT).map(s => s.stepT), stMed = median(sts);
     const coherent = sts.length >= 2 && (!cad || (stMed > 0.7 * cad.stepT && stMed < 1.4 * cad.stepT));
     if (coherent){
-      printSteps.forEach(s => { if (s.stepT && (s.stepT < 0.6 * stMed || s.stepT > 1.6 * stMed)) s.doubt = true; });   // pas douteux (bords de la vidéo)
+      // pas douteux : durée ou longueur anormale (empreinte manquée = « pas » double, fausse empreinte = pas trop court)
+      const lnMed = median(printSteps.filter(s => s.stepT).map(s => s.len));
+      printSteps.forEach((s, i) => { if (s.stepT ? (s.stepT < 0.6 * stMed || s.stepT > 1.6 * stMed || s.len < 0.65 * lnMed || s.len > 1.6 * lnMed) : i > 0) s.doubt = true; });   // sans durée : seul le 1er (position de départ) est normal
       summary.len = mean(printSteps.filter(s => s.stepT && !s.doubt).map(s => s.len)); summary.method = 'empreintes';
     } else { prints = []; printSteps = []; }
   }
-  return {rows, contacts, steps, scale, legMed, dt, pan, summary, reliable, fineTiming, cad, tooSmall, prints, printSteps};
+  let speedCurve = null;
+  if (!pan && scale){
+    speedCurve = [];
+    for (let i = 0; i < rows.length; i++){
+      const w = rows.filter(r => Math.abs(r.t - rows[i].t) <= 0.1);
+      if (w.length < 3 || w[w.length - 1].t - w[0].t < 0.1) continue;
+      speedCurve.push([rows[i].t, Math.abs(slope(w.map(r => r.t), w.map(r => r.hipX))) * scale]);
+    }
+    if (speedCurve.length < 3) speedCurve = null;
+  }
+  return {rows, contacts, steps, scale, legMed, dt, pan, summary, reliable, fineTiming, cad, tooSmall, prints, printSteps, framesUsed: src, speedCurve, cadW};
 }
 function recomputeGait(){ VS.gait = computeGait(); renderGait(); draw(); }
 function smooth(pts){ return pts.map((p, i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]; return [p[0], (a[1] + p[1] + b[1]) / 3]; }); }
@@ -1323,9 +1436,25 @@ function renderGait(){
   if (G.fineTiming && G.tooSmall) notes.push(`L'athlète est trop petit à l'image (jambe ≈ ${fmt(G.legMed, 0)} px, il en faut au moins 60) : la pose et le décollage du pied ne se distinguent pas du bruit de détection. Rapprochez-vous ou zoomez pour mesurer les temps de contact.`);
   else if (G.fineTiming && !G.reliable) notes.push('Les appuis détectés sont incohérents (durées impossibles) : temps de contact et de vol masqués.');
   if (!G.fineTiming) notes.push(`À ${fmt(1 / G.dt, 0)} images/s réelles, un appui ne dure que 2 à 3 images : les temps de contact et de vol ne sont pas mesurables. Filmez en ralenti (120 ou 240 i/s) pour les obtenir.`);
-  if (S.method === 'empreintes') notes.push('Longueur de chaque pas mesurée entre les positions successives des pieds plantés au sol (empreintes), sans temps de contact. Fréquence et vitesse : sur l\'ensemble de la course. Entre parenthèses : pas douteux (durée anormale), exclus de la moyenne.');
+  if (S.method === 'empreintes') notes.push('Longueur de chaque pas mesurée entre les positions successives des pieds plantés au sol (empreintes), sans temps de contact. Fréquence et vitesse : sur l\'ensemble de la course. Entre parenthèses : pas douteux (durée ou longueur anormale), exclus de la moyenne.');
   else if (S.method === 'rythme') notes.push('Les appuis image par image étant incertains, fréquence, vitesse et longueur de pas sont calculées sur l\'ensemble de la course (rythme des jambes et déplacement des hanches), une méthode plus robuste.');
-  $('#gNote').textContent = notes.join(' ');
+  // fréquence impossible pour un sprint → la vidéo est sans doute un ralenti (ou le facteur indiqué est faux)
+  let sugg = '';
+  const cw = G.cadW;
+  if (cw && cw.q >= 0.4 && (cw.freq < 2.8 || cw.freq > 6)){
+    const ok = [1, 2, 4, 8].filter(k => k !== slow()).map(k => ({k, f: cw.freq * k / slow()})).filter(x => x.f >= 3 && x.f <= 5.6);
+    if (ok.length) sugg = `<span class="warn" style="display:block;margin:8px 0">Fréquence de ${fmt(cw.freq, 1)} pas/s : impossible en sprint. ` +
+      (slow() === 1 ? 'La vidéo est sans doute un ralenti. ' : 'Le facteur de ralenti indiqué est sans doute faux. ') +
+      ok.map(x => `<button class="chip" data-slow="${x.k}">${x.k === 1 ? 'Temps réel' : 'Ralenti ×' + x.k} → ${fmt(x.f, 1)} pas/s</button>`).join(' ') + '</span>';
+  }
+  $('#gNote').innerHTML = sugg + esc(notes.join(' '));
+  const sc = G.speedCurve; $('#gSpeedBox').hidden = !sc;
+  if (sc){
+    const vmax = sc.reduce((b, p) => p[1] > b[1] ? p : b, sc[0]), x0 = sc[0][0], x1 = sc[sc.length - 1][0];
+    $('#gSpeedTxt').innerHTML = `Vitesse max mesurée : <b>${fmt(vmax[1])} m/s</b> à ${fmt(vmax[0], 2)} s` + (sc[0][1] < 0.6 * vmax[1] ? ` · de ${fmt(sc[0][1])} à ${fmt(vmax[1])} m/s sur la séquence` : '');
+    $('#gSpeed').innerHTML = chart({title:'Vitesse au fil du temps', h:200, xMin:x0, xMax:Math.max(x1, x0 + 0.1), yMin:0, yMax:Math.ceil(vmax[1] + 0.5), xLabel:'temps réel (s)', yLabel:'m/s', right:12,
+      series:[{pts: sc, color:'var(--accent)', width:2.6}], marks:[{x: vmax[0], y: vmax[1], color:'var(--accent)'}]});
+  }
 }
 function renderGaitChart(){
   const G = VS.gait; if (!G) return;
@@ -1346,6 +1475,7 @@ $('#gChart').addEventListener('click', e => {
   const x = +d.xmin + (sx - d.l) / d.pw * (d.xmax - d.xmin);
   vid.pause(); vid.currentTime = Math.max(0, Math.min(vid.duration, (Math.floor(x / dtReal()) + 0.5) / fps()));
 });
+$('#gNote').addEventListener('click', e => { const b = e.target.closest('[data-slow]'); if (!b) return; $('#vSlow').value = b.dataset.slow; syncSettings(); recomputeGait(); updTime(); renderMarks(); toast('Ralenti ajusté'); });
 $('#gSteps').addEventListener('click', e => { const tr = e.target.closest('tr[data-f]'); if (!tr) return; vid.pause(); vid.currentTime = (+tr.dataset.f + 0.5) / fps(); $('#stage').scrollIntoView({behavior:'smooth', block:'center'}); });
 
 /* ---------- Dessin sur la vidéo ---------- */
@@ -1366,7 +1496,11 @@ function pill(x, y, txt, col, align = 'left', size = 14){
   if (ctx.roundRect) ctx.roundRect(px, py, w, h, h / 2); else ctx.rect(px, py, w, h);
   ctx.fill(); ctx.fillStyle = col; ctx.fillText(txt, px + 6, py + h / 2 + size * 0.36);
 }
-function curLandmarks(){ const f = frameAt(vid.currentTime); for (const k of [f, f - 1, f + 1, f - 2]) { const a = VS.frames.get(k); if (a) return a; } return null; }
+function curLandmarks(){   // squelette nettoyé si l'analyse a été faite, sinon détection brute
+  const f = frameAt(vid.currentTime), src = VS.gait && VS.gait.framesUsed ? VS.gait.framesUsed : VS.frames;
+  for (const k of [f, f - 1, f + 1, f - 2]){ const a = src.get(k) || VS.frames.get(k); if (a) return a; }
+  return null;
+}
 const BONES = [[11,12],[11,23],[12,24],[23,24],[11,13],[13,15],[12,14],[14,16],[23,25],[25,27],[27,29],[29,31],[27,31],[24,26],[26,28],[28,30],[30,32],[28,32]];
 function drawSkeleton(a, r){
   const S = i => toScreen([a[i * 3], a[i * 3 + 1]], r);
