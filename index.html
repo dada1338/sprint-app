@@ -334,7 +334,7 @@ dialog .db{padding:16px}
     <h3>Angles au fil du temps</h3>
     <div class="row" id="gSeries"></div>
     <div id="gChart" style="margin-top:8px;cursor:pointer"></div>
-    <p class="muted small" style="margin:6px 0 0">Bandes colorées : appuis au sol (G ou D). Touchez le graphique pour aller à cet instant de la vidéo.</p>
+    <p class="muted small" style="margin:6px 0 0">Bandes colorées (si mesurables) : appuis au sol, G ou D. Touchez le graphique pour aller à cet instant de la vidéo.</p>
     <h3>Appuis</h3>
     <div class="tablewrap"><table id="gSteps"></table></div>
     <p class="muted small" id="gNote"></p>
@@ -1140,6 +1140,29 @@ function scaleMPerPx(rows){
   const legs = rows.map(r => r.leg).sort((x, y) => x - y);
   return 0.491 * H / legs[Math.floor((legs.length - 1) * 0.9)];
 }
+const slope = (xs, ys) => { const mx = mean(xs), my = mean(ys); let n = 0, d = 0; xs.forEach((x, i) => { n += (x - mx) * (ys[i] - my); d += (x - mx) ** 2; }); return d ? n / d : NaN; };
+/* Fréquence de pas par autocorrélation de l'écart horizontal entre les chevilles (une période = un pas) */
+function cadence(rows, dt){
+  const f0 = rows[0].f, f1 = rows[rows.length - 1].f; if (f1 - f0 < 0.6 / dt) return null;
+  const sig = []; let j = 0;
+  for (let f = f0; f <= f1; f++){
+    while (rows[j + 1] && rows[j + 1].f <= f) j++;
+    const a = rows[j], b = rows[j + 1] || a, u = b.f === a.f ? 0 : (f - a.f) / (b.f - a.f);
+    sig.push(a.sep + u * (b.sep - a.sep));
+  }
+  const m = mean(sig), x = sig.map(v => v - m), n = x.length, den = x.reduce((t, v) => t + v * v, 0) || 1;
+  const ac = L => { let t = 0; for (let i = 0; i + L < n; i++) t += x[i] * x[i + L]; return t / den * n / (n - L); };
+  const lo = Math.max(2, Math.floor(0.15 / dt)), hi = Math.min(n - 4, Math.ceil(0.45 / dt));
+  if (hi <= lo) return null;
+  const v = {}; for (let L = lo - 1; L <= hi + 1; L++) v[L] = ac(L);
+  const peaks = []; for (let L = lo; L <= hi; L++) if (v[L] >= v[L - 1] && v[L] >= v[L + 1]) peaks.push(L);
+  if (!peaks.length) return null;
+  const top = Math.max(...peaks.map(L => v[L])), L = peaks.find(P => v[P] >= 0.6 * top);   // 1er pic net = 1 pas
+  if (v[L] < 0.25) return null;
+  const off = (v[L - 1] - v[L + 1]) / (2 * (v[L - 1] - 2 * v[L] + v[L + 1])) || 0;
+  const stepT = (L + Math.max(-0.5, Math.min(0.5, off))) * dt;
+  return {stepT, freq: 1 / stepT, q: v[L]};
+}
 function computeGait(){
   if (!vid.videoWidth || VS.framesFps !== fps()) return null;
   const dt = dtReal(), rows = [];
@@ -1149,7 +1172,8 @@ function computeGait(){
     const foot = (he, to, side) => { const H = g(he), T = g(to); return {y: Math.max(H[1], T[1]), x: (H[0] + T[0]) / 2, side}; };
     const fl = foot(29, 31, 'G'), fr = foot(30, 32, 'D');
     const legL = dist(g(23), g(25)) + dist(g(25), g(27)), legR = dist(g(24), g(26)) + dist(g(26), g(28));
-    rows.push({f, t: (f + 0.5) * dt, low: fl.y >= fr.y ? fl : fr, leg: Math.max(legL, legR), ang: poseAngles(a)});
+    rows.push({f, t: (f + 0.5) * dt, low: fl.y >= fr.y ? fl : fr, leg: Math.max(legL, legR), ang: poseAngles(a),
+      hipX: (g(23)[0] + g(24)[0]) / 2, sep: Math.abs(g(27)[0] - g(28)[0])});
   });
   if (rows.length < 6) return null;
   const legMed = median(rows.map(r => r.leg));
@@ -1196,9 +1220,21 @@ function computeGait(){
   const summary = {
     tc: mean(okC.map(c => c.tc)), flight: mean(steps.map(s => s.flight).filter(x => x != null)),
     stepT: mean(stepTs), len: mean(lens), freq: 1 / mean(stepTs),
-    speed: pan ? (vIn > 0 ? vIn : NaN) : mean(steps.filter(s => s.len && s.stepT).map(s => s.len / s.stepT))
+    speed: pan ? (vIn > 0 ? vIn : NaN) : mean(steps.filter(s => s.len && s.stepT).map(s => s.len / s.stepT)),
+    method: 'appuis'
   };
-  return {rows, contacts, steps, scale, legMed, dt, pan, summary};
+  // Vidéo en vitesse normale ou appuis trop irréguliers : méthode robuste par le rythme des jambes
+  const cad = cadence(rows, dt), duration = (last - first + 1) * dt;
+  const fineTiming = 1 / dt >= 100;
+  const reliable = fineTiming && cad ? contacts.length >= 0.7 * duration / cad.stepT : fineTiming;
+  if (!reliable && cad){
+    const hipV = !pan && scale ? Math.abs(slope(rows.map(r => r.t), rows.map(r => r.hipX))) * scale : NaN;
+    summary.freq = cad.freq; summary.stepT = cad.stepT;
+    summary.speed = pan ? (vIn > 0 ? vIn : NaN) : hipV;
+    summary.len = summary.speed / cad.freq; summary.method = 'rythme';
+  }
+  if (!fineTiming){ summary.tc = NaN; summary.flight = NaN; }
+  return {rows, contacts, steps, scale, legMed, dt, pan, summary, reliable, fineTiming, cad};
 }
 function recomputeGait(){ VS.gait = computeGait(); renderGait(); draw(); }
 function smooth(pts){ return pts.map((p, i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]; return [p[0], (a[1] + p[1] + b[1]) / 3]; }); }
@@ -1206,13 +1242,14 @@ const kpi = (label, val, unit, hl) => `<div class="kpi${hl ? ' hl' : ''}"><span>
 function renderGait(){
   const G = VS.gait; $('#gaitCard').hidden = !G; if (!G) return;
   const S = G.summary;
+  const rythme = S.method === 'rythme';
   $('#gKpis').innerHTML = kpi('Temps de contact', fmt(S.tc, 3), 's', true) + kpi('Temps de vol', fmt(S.flight, 3), 's') +
-    kpi('Fréquence', fmt(S.freq, 2), 'pas/s') + kpi('Longueur de pas', fmt(S.len, 2), 'm', true) +
-    kpi(G.pan ? 'Vitesse (saisie)' : 'Vitesse', fmt(S.speed, 2), 'm/s') + kpi('Appuis détectés', G.contacts.length, '');
+    kpi(rythme ? 'Fréquence (rythme des jambes)' : 'Fréquence', fmt(S.freq, 2), 'pas/s') + kpi(rythme ? 'Longueur de pas (vitesse ÷ fréquence)' : 'Longueur de pas', fmt(S.len, 2), 'm', true) +
+    kpi(G.pan ? 'Vitesse (saisie)' : rythme ? 'Vitesse (déplacement des hanches)' : 'Vitesse', fmt(S.speed, 2), 'm/s') + kpi('Appuis détectés', G.contacts.length + (G.reliable ? '' : ' (incertain)'), '');
   $('#gSeries').innerHTML = SERIES.map(s => `<button class="chip" data-s="${s.k}" aria-pressed="${VS.series.has(s.k)}"><span class="dot" style="background:${s.color}"></span>${s.label}</button>`).join('');
   renderGaitChart();
   const kn = (c, a) => fmt(c.side === 'G' ? a.kneeL : a.kneeR, 0) + '°';
-  $('#gSteps').innerHTML = G.contacts.length ? `<thead><tr><th>#</th><th>Pied</th><th class="r">Instant (s)</th><th class="r">Contact (s)</th><th class="r">Vol (s)</th><th class="r">Pas (m)</th><th class="r hide-sm">Genou pose</th><th class="r hide-sm">Genou décoll.</th></tr></thead><tbody>` +
+  $('#gSteps').innerHTML = !G.reliable ? '<tbody><tr><td class="muted" style="white-space:normal">Appuis non mesurables de façon fiable sur cette vidéo (cadence d\'images trop faible ou détection irrégulière). Les moyennes ci-dessus restent valables.</td></tr></tbody>' : G.contacts.length ? `<thead><tr><th>#</th><th>Pied</th><th class="r">Instant (s)</th><th class="r">Contact (s)</th><th class="r">Vol (s)</th><th class="r">Pas (m)</th><th class="r hide-sm">Genou pose</th><th class="r hide-sm">Genou décoll.</th></tr></thead><tbody>` +
     G.steps.map((s, i) => { const c = s.c; return `<tr class="click" data-f="${c.f0}">
       <td class="muted">${i + 1}</td><td><span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c.side === 'G' ? COL_L : COL_R};margin-right:6px"></span>${c.side}</td>
       <td class="r">${fmt(c.f0 * G.dt, 3)}</td><td class="r"><b>${c.cutStart || c.cutEnd ? '(' + fmt(c.tc, 3) + ')' : fmt(c.tc, 3)}</b></td>
@@ -1223,7 +1260,8 @@ function renderGait(){
   if (!G.pan && !G.scale) notes.push('Longueurs de pas : renseignez l\'étalonnage (taille de l\'athlète ou 2 repères au sol).');
   if (!G.pan && G.scale && $('#vCalib').value === 'height') notes.push('Étalonnage par la taille de l\'athlète : précision ≈ ±5 %. Deux repères au sol donnent un résultat plus précis.');
   if (G.contacts.some(c => c.cutStart || c.cutEnd)) notes.push('Entre parenthèses : appui coupé par le début ou la fin de la plage analysée (exclu des moyennes).');
-  if (slow() === 1 && fps() <= 30) notes.push('À 30 images/s, un appui ne dure que 3 images : filmez en ralenti pour des temps de contact précis.');
+  if (!G.fineTiming) notes.push(`À ${fmt(1 / G.dt, 0)} images/s réelles, un appui ne dure que 2 à 3 images : les temps de contact et de vol ne sont pas mesurables. Filmez en ralenti (120 ou 240 i/s) pour les obtenir.`);
+  if (S.method === 'rythme') notes.push('Les appuis image par image étant incertains, fréquence, vitesse et longueur de pas sont calculées sur l\'ensemble de la course (rythme des jambes et déplacement des hanches), une méthode plus robuste.');
   $('#gNote').textContent = notes.join(' ');
 }
 function renderGaitChart(){
@@ -1234,7 +1272,7 @@ function renderGaitChart(){
   if (!sel.length){ mn = 0; mx = 180; }
   const yMin = Math.max(0, Math.floor((mn - 5) / 10) * 10), yMax = Math.max(yMin + 20, Math.min(180, Math.ceil((mx + 5) / 10) * 10));
   const x0 = G.rows[0].t - G.dt / 2, x1 = G.rows[G.rows.length - 1].t + G.dt / 2;
-  const bands = G.contacts.map(c => ({x0: c.f0 * G.dt, x1: (c.f1 + 1) * G.dt, fill: c.side === 'G' ? 'rgba(34,167,224,.18)' : 'rgba(255,122,61,.18)'}));
+  const bands = (G.reliable ? G.contacts : []).map(c => ({x0: c.f0 * G.dt, x1: (c.f1 + 1) * G.dt, fill: c.side === 'G' ? 'rgba(34,167,224,.18)' : 'rgba(255,122,61,.18)'}));
   $('#gChart').innerHTML = chart({title:'Angles articulaires au fil du temps', xMin:x0, xMax:Math.max(x1, x0 + 0.05), yMin, yMax, xLabel:'temps réel (s)', yLabel:'angle (°)', right:12, series, bands, cursor:(frameAt(vid.currentTime) + 0.5) * G.dt});
   updTime();
 }
@@ -1268,14 +1306,17 @@ function pill(x, y, txt, col, align = 'left', size = 14){
 function curLandmarks(){ const f = frameAt(vid.currentTime); for (const k of [f, f - 1, f + 1, f - 2]) { const a = VS.frames.get(k); if (a) return a; } return null; }
 const BONES = [[11,12],[11,23],[12,24],[23,24],[11,13],[13,15],[12,14],[14,16],[23,25],[25,27],[27,29],[29,31],[27,31],[24,26],[26,28],[28,30],[30,32],[28,32]];
 function drawSkeleton(a, r){
-  const S = i => toScreen([a[i * 3], a[i * 3 + 1]], r), lw = Math.max(2.5, r.h / 140);
+  const S = i => toScreen([a[i * 3], a[i * 3 + 1]], r);
+  // épaisseur proportionnelle à la taille de l'athlète à l'écran (sinon les points le masquent quand il est petit)
+  const leg = Math.max(dist(S(23), S(25)) + dist(S(25), S(27)), dist(S(24), S(26)) + dist(S(26), S(28)));
+  const lw = Math.max(1.2, Math.min(r.h / 140, leg / 28));
   ctx.lineCap = 'round'; ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 4;
   BONES.forEach(([i, j]) => {
     ctx.strokeStyle = (i % 2 && j % 2) ? COL_L : (!(i % 2) && !(j % 2)) ? COL_R : '#ffffff';
     ctx.lineWidth = lw; ctx.beginPath(); const p = S(i), q = S(j); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
   });
   ctx.shadowBlur = 0;
-  [11,12,13,14,15,16,23,24,25,26,27,28].forEach(i => { const p = S(i); ctx.beginPath(); ctx.arc(p[0], p[1], lw * 1.3, 0, 7); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = i % 2 ? COL_L : COL_R; ctx.stroke(); });
+  [11,12,13,14,15,16,23,24,25,26,27,28].forEach(i => { const p = S(i); ctx.beginPath(); ctx.arc(p[0], p[1], lw * 1.3, 0, 7); ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = Math.min(2, lw * 0.7); ctx.strokeStyle = i % 2 ? COL_L : COL_R; ctx.stroke(); });
   const n = S(0); ctx.beginPath(); ctx.arc(n[0], n[1], lw * 1.6, 0, 7); ctx.fillStyle = '#fff'; ctx.fill();
 }
 function drawAngles(a, r){
@@ -1302,7 +1343,7 @@ function drawHud(lines){
   lines.forEach(([t, c], i) => { ctx.fillStyle = c; ctx.fillText(t, x + 8, y + 4 + lh * (i + 1) - 5); });
 }
 function drawSteps(r, f){
-  const G = VS.gait; if (!G) return null;
+  const G = VS.gait; if (!G || !G.reliable) return null;   // appuis incertains : rien dessiné au sol
   if (!G.pan){
     const vis = G.contacts.map((c, i) => ({c, i, s: G.steps[i]})).filter(x => x.c.f0 <= f);
     vis.forEach(({c, i}) => {
