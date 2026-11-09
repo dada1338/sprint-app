@@ -343,6 +343,7 @@ dialog .db{padding:16px}
     <h3>Appuis</h3>
     <div class="tablewrap"><table id="gSteps"></table></div>
     <p class="muted small" id="gNote"></p>
+    <div class="row" style="margin-top:8px"><button id="gExport">Exporter l'analyse (CSV)</button></div>
   </div>
 
   <div class="card" id="manualCard" hidden>
@@ -1302,6 +1303,12 @@ function cleanFrames(src, dt){
   }
   return out;
 }
+/* En course, les pieds alternent : on impose l'alternance G/D, dans le sens qui s'accorde avec le plus d'étiquettes du modèle */
+function alternateSides(list){
+  if (list.length < 2) return;
+  const votes = list.reduce((v, it, i) => v + ((it.side === 'G') === (i % 2 === 0) ? 1 : -1), 0);
+  list.forEach((it, i) => { it.side = (i % 2 === 0) === (votes >= 0) ? 'G' : 'D'; });
+}
 function computeGait(){
   if (!vid.videoWidth || VS.framesFps !== fps()) return null;
   const dt = dtReal(), rows = [], src = cleanFrames(VS.frames, dt);
@@ -1341,6 +1348,7 @@ function computeGait(){
     return {f0, f1, side: nG * 2 >= rs.length ? 'G' : 'D', x: median(core.map(r => r.low.x)), y: median(core.map(r => r.low.y)),
       tc: (f1 - f0 + 1) * dt, cutStart: rs[0].f <= first + 1, cutEnd: rs[rs.length - 1].f >= last - 1, td: core[0].ang, to: core[core.length - 1].ang};
   });
+  alternateSides(contacts);
   const pan = isPan(), scale = scaleMPerPx(rows), vIn = num($('#vSpeed').value);
   const steps = contacts.map((c, i) => {
     const n = contacts[i + 1], s = {c, flight:null, stepT:null, len:null};
@@ -1382,6 +1390,8 @@ function computeGait(){
   let prints = [], printSteps = [];
   if (!reliable && !pan && scale){
     prints = footprints(rows, dt, legMed);
+    // la position de départ (2 empreintes quasi simultanées) n'est pas une alternance de pas
+    alternateSides(prints.filter((p, i) => !(i + 1 < prints.length && prints[i + 1].t0 - p.t0 < 0.05)));
     printSteps = prints.slice(1).map((p, i) => { const a = prints[i], dtp = p.t0 - a.t0; return {p, from: a, len: Math.abs(p.x - a.x) * scale, stepT: dtp >= 0.05 ? dtp : null}; });
     // cohérence avec la fréquence : des empreintes espacées de plus d'un pas = pas manqués (souvent à 30 i/s)
     const sts = printSteps.filter(s => s.stepT).map(s => s.stepT), stMed = median(sts);
@@ -1474,6 +1484,24 @@ $('#gChart').addEventListener('click', e => {
   const b = svg.getBoundingClientRect(), d = svg.dataset, sx = (e.clientX - b.left) / b.width * d.w;
   const x = +d.xmin + (sx - d.l) / d.pw * (d.xmax - d.xmin);
   vid.pause(); vid.currentTime = Math.max(0, Math.min(vid.duration, (Math.floor(x / dtReal()) + 0.5) / fps()));
+});
+/* Export CSV (séparateur « ; » et virgule décimale pour Excel en français) */
+$('#gExport').addEventListener('click', () => {
+  const G = VS.gait; if (!G) return;
+  const n = (x, d = 3) => Number.isFinite(x) ? x.toFixed(d).replace('.', ',') : '';
+  const L = [], S = G.summary;
+  L.push('Résumé'); L.push('Fréquence (pas/s);Longueur de pas (m);Vitesse (m/s);Temps de contact (s);Temps de vol (s);Méthode');
+  L.push([n(S.freq, 2), n(S.len, 2), n(S.speed, 2), n(S.tc), n(S.flight), S.method].join(';')); L.push('');
+  if (G.reliable){ L.push('Appuis'); L.push('#;Pied;Instant (s);Contact (s);Vol (s);Pas (m);Genou pose (°);Genou décollage (°)');
+    G.steps.forEach((s, i) => { const c = s.c, k = a => c.side === 'G' ? a.kneeL : a.kneeR; L.push([i + 1, c.side, n(c.f0 * G.dt), n(c.tc), n(s.flight), n(s.len, 2), n(k(c.td), 0), n(k(c.to), 0)].join(';')); }); }
+  else if (G.prints && G.prints.length){ L.push('Pas (empreintes)'); L.push('#;Pied;Instant (s);Pas (m);Durée du pas (s);Douteux');
+    G.prints.forEach((p, i) => { const s = i ? G.printSteps[i - 1] : null; L.push([i + 1, p.side, n(p.t0), s ? n(s.len, 2) : 'départ', s ? n(s.stepT) : '', s && s.doubt ? 'oui' : ''].join(';')); }); }
+  L.push(''); L.push('Images'); L.push('Temps réel (s);Genou G;Genou D;Hanche G;Hanche D;Tronc;Coude G;Coude D;Vitesse (m/s)');
+  const sp = new Map((G.speedCurve || []).map(p => [p[0], p[1]]));
+  G.rows.forEach(r => { const a = r.ang; L.push([n(r.t), n(a.kneeL, 1), n(a.kneeR, 1), n(a.hipL, 1), n(a.hipR, 1), n(a.trunk, 1), n(a.elbowL, 1), n(a.elbowR, 1), n(sp.get(r.t), 2)].join(';')); });
+  const blob = new Blob(['\ufeff' + L.join('\r\n')], {type: 'text/csv;charset=utf-8'});
+  const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = 'sprintlab-analyse-' + today() + '.csv'; el.click();
+  setTimeout(() => URL.revokeObjectURL(el.href), 2000);
 });
 $('#gNote').addEventListener('click', e => { const b = e.target.closest('[data-slow]'); if (!b) return; $('#vSlow').value = b.dataset.slow; syncSettings(); recomputeGait(); updTime(); renderMarks(); toast('Ralenti ajusté'); });
 $('#gSteps').addEventListener('click', e => { const tr = e.target.closest('tr[data-f]'); if (!tr) return; vid.pause(); vid.currentTime = (+tr.dataset.f + 0.5) / fps(); $('#stage').scrollIntoView({behavior:'smooth', block:'center'}); });
