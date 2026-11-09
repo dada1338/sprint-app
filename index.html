@@ -1001,6 +1001,17 @@ async function detectFrame(){
   if (a) for (let i = 0; i < 33; i++){ a[i * 3] = (sx + a[i * 3] * sd) / vw; a[i * 3 + 1] = (sy + a[i * 3 + 1] * sd) / vh; }
   return a;
 }
+/* recherche de l'athlète à plusieurs échelles autour de la zone courante (athlète petit ou perdu) */
+async function acquire(){
+  const R = VS.roi, vh = vid.videoHeight, sides = [R.side, ...[0.35, 0.24, 0.18, 0.14].map(k => k * vh)];
+  for (const sd of sides){
+    R.side = sd; AI.pose.reset();
+    const a = await detectFrame();
+    if (plausible(a)) return a;
+  }
+  R.side = 0.24 * vh;
+  return null;
+}
 /* squelette crédible ? (les fausses détections ont des jambes quasi invisibles) */
 function plausible(a){ return !!a && [23, 24, 25, 26, 27, 28].reduce((x, i) => x + a[i * 3 + 2], 0) / 6 >= 0.35; }
 /* recentre la zone sur les hanches, anticipe le déplacement et rejette les détections incohérentes ; renvoie le squelette retenu */
@@ -1017,7 +1028,7 @@ function followRoi(a, f){
   }
   if (!ok){
     R.miss++;
-    if (R.miss <= 15){ R.cx += R.vx; R.cy += R.vy; R.side = Math.min(R.side * 1.12, 0.6 * vh, vw); }
+    if (R.miss <= 15){ R.cx += R.vx; R.cy += R.vy; }
     if (R.miss > 3) AI.pose.reset();
     return null;
   }
@@ -1055,7 +1066,7 @@ async function analyzeAll(){
     if (f < 0){ resetRoi(); continue; }
     await seekTo((f + 0.5) / F);
     let lm = null;
-    try { lm = await detectFrame(); } catch (e) {}
+    try { lm = VS.roi && (!VS.roi.last || (VS.roi.miss >= 2 && (VS.roi.miss < 6 || VS.roi.miss % 5 === 0))) ? await acquire() : await detectFrame(); } catch (e) {}
     lm = followRoi(lm, f); VS.frames.set(f, lm);
     AI.lastF = f; done++;
     $('#aiProg div').style.width = (done / tot * 100) + '%';
