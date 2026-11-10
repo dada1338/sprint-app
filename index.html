@@ -1228,13 +1228,20 @@ function cadence(rows, dt, wide){   // wide : recherche sur toute la plage (dét
 }
 /* Empreintes : moments où un pied ne bouge plus horizontalement (caméra fixe). Indépendant de l'étiquette G/D,
    qui s'inverse parfois, et du bruit vertical : fonctionne même si l'athlète est petit à l'image. */
-function footprints(rows, dt, legMed){
-  const K = Math.max(1, Math.round(0.04 / dt)), pts = [];   // fenêtre ±0,04 s : robuste au tremblement d'un petit athlète
-  for (const side of [0, 1]) for (let i = 0; i < rows.length; i++){
+/* vitesse horizontale de chaque pied (jambes/s), régression locale ±0,04 s : robuste au tremblement d'un petit athlète */
+function footSpeeds(rows, dt, legMed){
+  const K = Math.max(1, Math.round(0.04 / dt));
+  return [0, 1].map(side => rows.map((r, i) => {
     const lo = Math.max(0, i - K), hi = Math.min(rows.length - 1, i + K);
-    if (hi - lo < 2 || rows[hi].f - rows[lo].f > 3 * (hi - lo)) continue;
+    if (hi - lo < 2 || rows[hi].f - rows[lo].f > 3 * (hi - lo)) return null;
     const ts = [], xs = []; for (let j = lo; j <= hi; j++){ ts.push(rows[j].t); xs.push(rows[j].fx[side]); }
-    if (Math.abs(slope(ts, xs)) / legMed < 1.5) pts.push({t: rows[i].t, f: rows[i].f, x: rows[i].fx[side], y: rows[i].fy[side], side});
+    return Math.abs(slope(ts, xs)) / legMed;
+  }));
+}
+function footprints(rows, dt, legMed){
+  const spd = footSpeeds(rows, dt, legMed), pts = [];
+  for (const side of [0, 1]) for (let i = 0; i < rows.length; i++){
+    if (spd[side][i] != null && spd[side][i] < 1.5) pts.push({t: rows[i].t, f: rows[i].f, x: rows[i].fx[side], y: rows[i].fy[side], side});
   }
   pts.sort((a, b) => a.t - b.t);
   const groups = [];
@@ -1304,10 +1311,11 @@ function cleanFrames(src, dt){
   return out;
 }
 /* En course, les pieds alternent : on impose l'alternance G/D, dans le sens qui s'accorde avec le plus d'étiquettes du modèle */
-function alternateSides(list){
+function alternateSides(list, gaps){
   if (list.length < 2) return;
-  const votes = list.reduce((v, it, i) => v + ((it.side === 'G') === (i % 2 === 0) ? 1 : -1), 0);
-  list.forEach((it, i) => { it.side = (i % 2 === 0) === (votes >= 0) ? 'G' : 'D'; });
+  let k = 0; const par = list.map((it, i) => (k += gaps ? gaps[i] || 0 : (i ? 1 : 0)) % 2);   // parité du pas (un « pas » double compte 2)
+  const votes = list.reduce((v, it, i) => v + ((it.side === 'G') === (par[i] === 0) ? 1 : -1), 0);
+  list.forEach((it, i) => { it.side = (par[i] === 0) === (votes >= 0) ? 'G' : 'D'; });
 }
 function computeGait(){
   if (!vid.videoWidth || VS.framesFps !== fps()) return null;
@@ -1390,16 +1398,33 @@ function computeGait(){
   let prints = [], printSteps = [];
   if (!reliable && !pan && scale){
     prints = footprints(rows, dt, legMed);
-    // la position de départ (2 empreintes quasi simultanées) n'est pas une alternance de pas
-    alternateSides(prints.filter((p, i) => !(i + 1 < prints.length && prints[i + 1].t0 - p.t0 < 0.05)));
-    printSteps = prints.slice(1).map((p, i) => { const a = prints[i], dtp = p.t0 - a.t0; return {p, from: a, len: Math.abs(p.x - a.x) * scale, stepT: dtp >= 0.05 ? dtp : null}; });
+    const startPair = i => i + 1 < prints.length && prints[i + 1].t0 - prints[i].t0 < 0.05;   // position de départ : 2 pieds posés
+    const mkSteps = () => prints.slice(1).map((p, i) => { const a = prints[i], dtp = p.t0 - a.t0; return {p, from: a, len: Math.abs(p.x - a.x) * scale, stepT: dtp >= 0.05 ? dtp : null}; });
+    printSteps = mkSteps();
     // cohérence avec la fréquence : des empreintes espacées de plus d'un pas = pas manqués (souvent à 30 i/s)
-    const sts = printSteps.filter(s => s.stepT).map(s => s.stepT), stMed = median(sts);
+    let sts = printSteps.filter(s => s.stepT).map(s => s.stepT), stMed = median(sts);
     const coherent = sts.length >= 2 && (!cad || (stMed > 0.7 * cad.stepT && stMed < 1.4 * cad.stepT));
     if (coherent){
+      // empreinte manquée entre deux empreintes espacées de 2 pas : on la recherche au milieu avec un seuil d'immobilité plus tolérant
+      let lnMed = median(printSteps.filter(s => s.stepT).map(s => s.len));
+      const spd = footSpeeds(rows, dt, legMed), added = [];
+      printSteps.forEach(st => {
+        if (!st.stepT || st.stepT < 1.6 * stMed || st.stepT > 2.5 * stMed || st.len < 1.5 * lnMed || st.len > 2.5 * lnMed) return;
+        const a = st.from, b = st.p, xm = (a.x + b.x) / 2, gap = b.t0 - a.t0;
+        let best = null;
+        rows.forEach((r, i) => {
+          if (r.t < a.t0 + 0.3 * gap || r.t > a.t0 + 0.75 * gap) return;
+          [0, 1].forEach(side => { const v = spd[side][i];
+            if (v != null && Math.abs(r.fx[side] - xm) < 0.3 * Math.abs(b.x - a.x) && (!best || v < best.v)) best = {v, t0: r.t, f0: r.f, x: r.fx[side], y: r.fy[side], side: side ? 'D' : 'G', recovered: true}; });
+        });
+        if (best && best.v < 4) added.push(best);
+      });
+      if (added.length){ prints = prints.concat(added).sort((p, q) => p.t0 - q.t0); printSteps = mkSteps(); sts = printSteps.filter(s => s.stepT).map(s => s.stepT); stMed = median(sts); lnMed = median(printSteps.filter(s => s.stepT).map(s => s.len)); }
       // pas douteux : durée ou longueur anormale (empreinte manquée = « pas » double, fausse empreinte = pas trop court)
-      const lnMed = median(printSteps.filter(s => s.stepT).map(s => s.len));
       printSteps.forEach((s, i) => { if (s.stepT ? (s.stepT < 0.6 * stMed || s.stepT > 1.6 * stMed || s.len < 0.65 * lnMed || s.len > 1.6 * lnMed) : i > 0) s.doubt = true; });   // sans durée : seul le 1er (position de départ) est normal
+      // alternance G/D en comptant 2 pas pour un « pas » double restant
+      const seq = prints.filter((p, i) => !startPair(i)), gaps = seq.map((p, i) => { if (!i) return 0; const st = printSteps.find(s => s.p === p); return st && st.stepT && st.stepT > 1.6 * stMed && st.len > 1.5 * lnMed ? 2 : 1; });
+      alternateSides(seq, gaps);
       summary.len = mean(printSteps.filter(s => s.stepT && !s.doubt).map(s => s.len)); summary.method = 'empreintes';
     } else { prints = []; printSteps = []; }
   }
@@ -1408,9 +1433,12 @@ function computeGait(){
     speedCurve = [];
     for (let i = 0; i < rows.length; i++){
       const w = rows.filter(r => Math.abs(r.t - rows[i].t) <= 0.1);
-      if (w.length < 3 || w[w.length - 1].t - w[0].t < 0.1) continue;
+      // fenêtre complète des deux côtés (pas d'effet de bord quand l'athlète entre ou sort de l'image)
+      if (w.length < 3 || w[0].t > rows[i].t - 0.08 || w[w.length - 1].t < rows[i].t + 0.08) continue;
       speedCurve.push([rows[i].t, Math.abs(slope(w.map(r => r.t), w.map(r => r.hipX))) * scale]);
     }
+    // filtre médian (5 points) contre les pics isolés
+    speedCurve = speedCurve.map((p, i) => [p[0], median(speedCurve.slice(Math.max(0, i - 2), i + 3).map(q => q[1]))]);
     if (speedCurve.length < 3) speedCurve = null;
   }
   return {rows, contacts, steps, scale, legMed, dt, pan, summary, reliable, fineTiming, cad, tooSmall, prints, printSteps, framesUsed: src, speedCurve, cadW};
@@ -1431,7 +1459,7 @@ function renderGait(){
   $('#gSteps').innerHTML = !G.reliable && G.printSteps && G.printSteps.length ? `<thead><tr><th>#</th><th>Pied</th><th class="r">Instant (s)</th><th class="r">Pas (m)</th><th class="r">Durée du pas (s)</th></tr></thead><tbody>` +
       G.prints.map((p, i) => { const st = i ? G.printSteps[i - 1] : null; return `<tr class="click" data-f="${p.f0}"><td class="muted">${i + 1}</td>
         <td><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.side === 'G' ? COL_L : COL_R};margin-right:6px"></span>${p.side}</td>
-        <td class="r">${fmt(p.t0, 3)}</td><td class="r"><b>${st ? (st.doubt ? '(' + fmt(st.len, 2) + ')' : fmt(st.len, 2)) : (G.printSteps[0] && !G.printSteps[0].stepT ? 'départ' : '–')}</b></td><td class="r">${st && st.stepT ? fmt(st.stepT, 3) : '–'}</td></tr>`; }).join('') + '</tbody>'
+        <td class="r">${fmt(p.t0, 3)}</td><td class="r"><b>${st ? (st.doubt ? '(' + fmt(st.len, 2) + ')' : (p.recovered || st.from.recovered ? '≈ ' : '') + fmt(st.len, 2)) : (G.printSteps[0] && !G.printSteps[0].stepT ? 'départ' : '–')}</b></td><td class="r">${st && st.stepT ? fmt(st.stepT, 3) : '–'}</td></tr>`; }).join('') + '</tbody>'
     : !G.reliable ? '<tbody><tr><td class="muted" style="white-space:normal">Appuis non mesurables de façon fiable sur cette vidéo (cadence d\'images trop faible ou détection irrégulière). Les moyennes ci-dessus restent valables.</td></tr></tbody>' : G.contacts.length ? `<thead><tr><th>#</th><th>Pied</th><th class="r">Instant (s)</th><th class="r">Contact (s)</th><th class="r">Vol (s)</th><th class="r">Pas (m)</th><th class="r hide-sm">Genou pose</th><th class="r hide-sm">Genou décoll.</th></tr></thead><tbody>` +
     G.steps.map((s, i) => { const c = s.c; return `<tr class="click" data-f="${c.f0}">
       <td class="muted">${i + 1}</td><td><span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c.side === 'G' ? COL_L : COL_R};margin-right:6px"></span>${c.side}</td>
@@ -1446,7 +1474,7 @@ function renderGait(){
   if (G.fineTiming && G.tooSmall) notes.push(`L'athlète est trop petit à l'image (jambe ≈ ${fmt(G.legMed, 0)} px, il en faut au moins 60) : la pose et le décollage du pied ne se distinguent pas du bruit de détection. Rapprochez-vous ou zoomez pour mesurer les temps de contact.`);
   else if (G.fineTiming && !G.reliable) notes.push('Les appuis détectés sont incohérents (durées impossibles) : temps de contact et de vol masqués.');
   if (!G.fineTiming) notes.push(`À ${fmt(1 / G.dt, 0)} images/s réelles, un appui ne dure que 2 à 3 images : les temps de contact et de vol ne sont pas mesurables. Filmez en ralenti (120 ou 240 i/s) pour les obtenir.`);
-  if (S.method === 'empreintes') notes.push('Longueur de chaque pas mesurée entre les positions successives des pieds plantés au sol (empreintes), sans temps de contact. Fréquence et vitesse : sur l\'ensemble de la course. Entre parenthèses : pas douteux (durée ou longueur anormale), exclus de la moyenne.');
+  if (S.method === 'empreintes') notes.push('Longueur de chaque pas mesurée entre les positions successives des pieds plantés au sol (empreintes), sans temps de contact. Fréquence et vitesse : sur l\'ensemble de la course. Entre parenthèses : pas douteux (durée ou longueur anormale), exclus de la moyenne. « ≈ » : empreinte manquée retrouvée par estimation, longueur moins précise.');
   else if (S.method === 'rythme') notes.push('Les appuis image par image étant incertains, fréquence, vitesse et longueur de pas sont calculées sur l\'ensemble de la course (rythme des jambes et déplacement des hanches), une méthode plus robuste.');
   // fréquence impossible pour un sprint → la vidéo est sans doute un ralenti (ou le facteur indiqué est faux)
   let sugg = '';
@@ -1495,7 +1523,7 @@ $('#gExport').addEventListener('click', () => {
   if (G.reliable){ L.push('Appuis'); L.push('#;Pied;Instant (s);Contact (s);Vol (s);Pas (m);Genou pose (°);Genou décollage (°)');
     G.steps.forEach((s, i) => { const c = s.c, k = a => c.side === 'G' ? a.kneeL : a.kneeR; L.push([i + 1, c.side, n(c.f0 * G.dt), n(c.tc), n(s.flight), n(s.len, 2), n(k(c.td), 0), n(k(c.to), 0)].join(';')); }); }
   else if (G.prints && G.prints.length){ L.push('Pas (empreintes)'); L.push('#;Pied;Instant (s);Pas (m);Durée du pas (s);Douteux');
-    G.prints.forEach((p, i) => { const s = i ? G.printSteps[i - 1] : null; L.push([i + 1, p.side, n(p.t0), s ? n(s.len, 2) : (G.printSteps[0] && !G.printSteps[0].stepT ? 'départ' : ''), s ? n(s.stepT) : '', s && s.doubt ? 'oui' : ''].join(';')); }); }
+    G.prints.forEach((p, i) => { const s = i ? G.printSteps[i - 1] : null; L.push([i + 1, p.side, n(p.t0), s ? n(s.len, 2) : (G.printSteps[0] && !G.printSteps[0].stepT ? 'départ' : ''), s ? n(s.stepT) : '', s && s.doubt ? 'oui' : (p.recovered ? 'empreinte estimée' : '')].join(';')); }); }
   L.push(''); L.push('Images'); L.push('Temps réel (s);Genou G;Genou D;Hanche G;Hanche D;Tronc;Coude G;Coude D;Vitesse (m/s)');
   const sp = new Map((G.speedCurve || []).map(p => [p[0], p[1]]));
   G.rows.forEach(r => { const a = r.ang; L.push([n(r.t), n(a.kneeL, 1), n(a.kneeR, 1), n(a.hipL, 1), n(a.hipR, 1), n(a.trunk, 1), n(a.elbowL, 1), n(a.elbowR, 1), n(sp.get(r.t), 2)].join(';')); });
