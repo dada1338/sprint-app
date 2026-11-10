@@ -1303,6 +1303,11 @@ function cleanFrames(src, dt){
         const mad = win.map(x => Math.abs(x - med)).sort((a, b) => a - b)[win.length >> 1];
         if (Math.abs(v[j] - med) > Math.max(0.12 * leg, 4 * 1.4826 * mad)) w[j] = med;
       }
+      // tronc (épaules, hanches) : trajectoire régulière → écart à l'interpolation entre images voisines
+      if (i === 11 || i === 12 || i === 23 || i === 24) for (let j = 1; j + 1 < w.length; j++){
+        const fa = r[j - 1], fb = r[j + 1], pred = w[j - 1] + (w[j + 1] - w[j - 1]) * (r[j] - fa) / (fb - fa);
+        if (Math.abs(w[j] - pred) > 0.1 * leg) w[j] = pred;
+      }
       let z = w;
       if (sg && w.length > 2 * m + 1){ z = w.map((x, j) => { if (j < m || j >= w.length - m) return x; let t = 0; for (let k = -m; k <= m; k++) t += sg[k + m] * w[j + k]; return t; }); }
       r.forEach((f, j) => { out.get(f)[i * 3 + c] = z[j] / sc; });
@@ -1432,13 +1437,14 @@ function computeGait(){
   if (!pan && scale){
     speedCurve = [];
     for (let i = 0; i < rows.length; i++){
-      const w = rows.filter(r => Math.abs(r.t - rows[i].t) <= 0.1);
+      const w = rows.filter(r => Math.abs(r.t - rows[i].t) <= 0.105);   // ±0,1 s (+ marge d'arrondi)
       // fenêtre complète des deux côtés (pas d'effet de bord quand l'athlète entre ou sort de l'image)
-      if (w.length < 3 || w[0].t > rows[i].t - 0.08 || w[w.length - 1].t < rows[i].t + 0.08) continue;
+      if (w.length < 3 || w[0].t > rows[i].t - 0.06 || w[w.length - 1].t < rows[i].t + 0.06) continue;
       speedCurve.push([rows[i].t, Math.abs(slope(w.map(r => r.t), w.map(r => r.hipX))) * scale]);
     }
-    // filtre médian (5 points) contre les pics isolés
-    speedCurve = speedCurve.map((p, i) => [p[0], median(speedCurve.slice(Math.max(0, i - 2), i + 3).map(q => q[1]))]);
+    // filtre médian sur ±0,07 s (au moins ±2 points) contre les pics brefs
+    const sc0 = speedCurve, hw = Math.max(2, Math.round(0.07 / dt));
+    speedCurve = sc0.map((p, i) => [p[0], median(sc0.slice(Math.max(0, i - hw), i + hw + 1).map(q => q[1]))]);
     if (speedCurve.length < 3) speedCurve = null;
   }
   return {rows, contacts, steps, scale, legMed, dt, pan, summary, reliable, fineTiming, cad, tooSmall, prints, printSteps, framesUsed: src, speedCurve, cadW};
