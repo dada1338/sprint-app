@@ -344,6 +344,16 @@ dialog .db{padding:16px}
     <div class="tablewrap"><table id="gSteps"></table></div>
     <p class="muted small" id="gNote"></p>
     <div class="row" style="margin-top:8px"><button id="gExport">Exporter l'analyse (CSV)</button></div>
+    <div class="ai-box" id="gSaveBox">
+      <h3 style="margin-top:0">Suivi de la cassure</h3>
+      <div class="grid2">
+        <label>Athlète<select id="gAth"></select></label>
+        <label>Date de la vidéo<input type="date" id="gDate"></label>
+        <label>Moment de la course<input type="text" id="gLabel" placeholder="ex. départ, milieu, fin de 30 m"></label>
+        <label style="justify-content:flex-end"><button class="primary" id="gSaveBtn" type="button">Enregistrer dans le suivi</button></label>
+      </div>
+      <div id="gTrend" style="margin-top:10px"></div>
+    </div>
   </div>
 
   <div class="card" id="manualCard" hidden>
@@ -490,10 +500,12 @@ function seed(){
       });
     }
   });
-  return {athletes, sessions};
+  return {athletes, sessions, videos: []};
 }
+/* db.videos : analyses vidéo enregistrées pour le suivi (cassure, tronc, axe, vitesse…) */
 let db = (() => { try { const d = JSON.parse(LS.get(KEY)); if (d && Array.isArray(d.athletes) && Array.isArray(d.sessions)) return d; } catch (e) {} return seed(); })();
 const save = () => LS.set(KEY, JSON.stringify(db));
+if (!Array.isArray(db.videos)) db.videos = [];
 const athlete = id => db.athletes.find(a => a.id === id);
 
 const fitCache = new Map();
@@ -619,7 +631,7 @@ $('#exportBtn').addEventListener('click', () => {
 $('#importBtn').addEventListener('click', () => $('#importFile').click());
 $('#importFile').addEventListener('change', async e => {
   const file = e.target.files[0]; if (!file) return;
-  try { const d = JSON.parse(await file.text()); if (!Array.isArray(d.athletes) || !Array.isArray(d.sessions)) throw 0; db = d; save(); renderTeam(); toast('Données importées'); }
+  try { const d = JSON.parse(await file.text()); if (!Array.isArray(d.athletes) || !Array.isArray(d.sessions)) throw 0; db = d; if (!Array.isArray(db.videos)) db.videos = []; save(); renderTeam(); toast('Données importées'); }
   catch (err) { toast('Fichier invalide'); }
   e.target.value = '';
 });
@@ -643,11 +655,20 @@ function openAthlete(id){
       yMin: Math.floor((mn - 0.3) * 2) / 2, yMax: Math.ceil((mx + 0.3) * 2) / 2, yLabel:'m/s',
       series:[{pts, color:'var(--accent)', width:2.5, dots:true}]});
   } else html += `<p class="muted">Pas encore de séance chronométrée.</p>`;
-  html += `<h3>Séances</h3><div class="tablewrap"><table><thead><tr><th>Date</th><th>Séance</th><th class="r">Vmax</th><th class="r">30 m</th><th></th></tr></thead><tbody>` +
+  if (st.ss.length) html += `<h3>Séances</h3><div class="tablewrap"><table><thead><tr><th>Date</th><th>Séance</th><th class="r">Vmax</th><th class="r">30 m</th><th></th></tr></thead><tbody>` +
     st.ss.slice().reverse().map(s => { const f = sessionFit(s); return `<tr>
       <td>${fmtDate(s.date)}</td><td>${esc(s.label || '—')}</td><td class="r">${f ? fmt(f.V) : '–'}</td><td class="r">${f ? fmt(M.time(30, f.V, f.tau)) : '–'}</td>
       <td class="r"><button class="icon" data-open="${s.id}">Ouvrir</button> <button class="icon danger" data-del="${s.id}" aria-label="Supprimer">✕</button></td></tr>`; }).join('') +
     `</tbody></table></div>`;
+  const vids = athVideos(a.id);
+  if (vids.length){
+    html += `<h3>Analyses vidéo : cassure aux hanches</h3>` + trendChart(vids) +
+      `<p class="muted small" style="margin:4px 0 8px">Cassure = tronc − axe de la jambe en milieu d'appui (médiane). 0° = corps aligné depuis le pied ; positive = le tronc plonge en avant.</p>` +
+      `<div class="tablewrap"><table><thead><tr><th>Date</th><th>Moment</th><th class="r">Cassure</th><th class="r">Tronc / axe</th><th class="r hide-sm">Vitesse</th><th></th></tr></thead><tbody>` +
+      vids.slice().reverse().map(v => `<tr><td>${fmtDate(v.date)}</td><td>${esc(v.label || '—')}</td><td class="r"><b>${sgn(v.cassure ?? NaN)}</b></td>
+        <td class="r">${v.trunk != null ? Math.round(v.trunk) + '° / ' + Math.round(v.axis) + '°' : '–'}</td><td class="r hide-sm">${v.speed != null ? fmt(v.speed) + ' m/s' : '–'}</td>
+        <td class="r"><button class="icon danger" data-delvid="${v.id}" aria-label="Supprimer">✕</button></td></tr>`).join('') + '</tbody></table></div>';
+  }
   html += `<div class="sticky-actions"><button class="primary" data-new="${a.id}">Nouvelle séance</button><button class="danger" data-delath="${a.id}">Supprimer l'athlète</button></div>`;
   $('#dlgBody').innerHTML = html;
   const dlg = $('#athDlg'); if (!dlg.open) dlg.showModal();
@@ -659,7 +680,8 @@ $('#athDlg').addEventListener('click', e => {
   if (t.dataset.open){ $('#athDlg').close(); loadSession(db.sessions.find(s => s.id === t.dataset.open)); show('chrono'); }
   if (t.dataset.del && confirm('Supprimer cette séance ?')){ const s = db.sessions.find(x => x.id === t.dataset.del); db.sessions = db.sessions.filter(x => x.id !== t.dataset.del); save(); openAthlete(s.athleteId); renderTeam(); }
   if (t.dataset.new){ $('#athDlg').close(); newSession(t.dataset.new); show('chrono'); }
-  if (t.dataset.delath && confirm('Supprimer l\'athlète et toutes ses séances ?')){ db.athletes = db.athletes.filter(a => a.id !== t.dataset.delath); db.sessions = db.sessions.filter(s => s.athleteId !== t.dataset.delath); save(); $('#athDlg').close(); renderTeam(); }
+  if (t.dataset.delvid && confirm('Supprimer cette analyse vidéo du suivi ?')){ const v = db.videos.find(x => x.id === t.dataset.delvid); db.videos = db.videos.filter(x => x.id !== t.dataset.delvid); save(); openAthlete(v.athleteId); }
+  if (t.dataset.delath && confirm('Supprimer l\'athlète et toutes ses séances ?')){ db.athletes = db.athletes.filter(a => a.id !== t.dataset.delath); db.sessions = db.sessions.filter(s => s.athleteId !== t.dataset.delath); db.videos = db.videos.filter(v => v.athleteId !== t.dataset.delath); save(); $('#athDlg').close(); renderTeam(); }
 });
 
 /* ============================================================
@@ -894,8 +916,15 @@ const hints = {
   calib: 'Touchez 2 repères au sol dont vous connaissez l\'écart (plots, lignes). Caméra fixe uniquement.'
 };
 
+function videoDate(file){
+  const m = /(20\d{2})(\d{2})(\d{2})/.exec(file.name || '');
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  try { return new Date(file.lastModified).toISOString().slice(0, 10); } catch (e) { return today(); }
+}
 function loadVideo(file){
   if (!file) return;
+  VS.date = videoDate(file); VS.fileName = file.name || '';
+  $('#gDate').value = VS.date; $('#gLabel').value = '';
   if (AI.running) AI.cancel = true;
   if (VS.url) URL.revokeObjectURL(VS.url);
   VS.url = URL.createObjectURL(file); vid.src = VS.url;
@@ -1536,6 +1565,7 @@ function renderGait(){
       ok.map(x => `<button class="chip" data-slow="${x.k}">${x.k === 1 ? 'Temps réel' : 'Ralenti ×' + x.k} → ${fmt(x.f, 1)} pas/s</button>`).join(' ') + '</span>';
   }
   $('#gNote').innerHTML = sugg + esc(notes.join(' '));
+  renderTrendForm();
   const sc = G.speedCurve; $('#gSpeedBox').hidden = !sc;
   if (sc){
     const vmax = sc.reduce((b, p) => p[1] > b[1] ? p : b, sc[0]), x0 = sc[0][0], x1 = sc[sc.length - 1][0];
@@ -1563,6 +1593,41 @@ $('#gChart').addEventListener('click', e => {
   const x = +d.xmin + (sx - d.l) / d.pw * (d.xmax - d.xmin);
   vid.pause(); vid.currentTime = Math.max(0, Math.min(vid.duration, (Math.floor(x / dtReal()) + 0.5) / fps()));
 });
+/* ---------- Suivi de la cassure d'une séance à l'autre ---------- */
+function trendChart(list, h){
+  const pts = k => list.map((v, i) => [i, v[k]]).filter(p => Number.isFinite(p[1]));
+  const all = list.flatMap(v => [v.cassure, v.trunk, v.axis]).filter(Number.isFinite);
+  if (!all.length) return '<p class="muted small">Pas de mesure de cassure dans ces analyses.</p>';
+  const yMin = Math.min(0, Math.floor((Math.min(...all) - 5) / 10) * 10), yMax = Math.ceil((Math.max(...all) + 5) / 10) * 10;
+  return chart({title: 'Suivi de la cassure', h: h || 220, xMin: -0.3, xMax: Math.max(1, list.length - 1) + 0.3, xStep: 1,
+    xFmt: i => { const k = Math.round(i), v = list[k]; return v && (!k || list[k - 1].date !== v.date) ? fmtDate(v.date) : ''; }, yMin, yMax, yLabel: 'degrés', right: 70,
+    series: [{pts: pts('trunk'), color: 'var(--series2)', width: 1.8, dash: '6 4', dots: true, label: 'tronc'},
+             {pts: pts('axis'), color: 'var(--series3)', width: 1.8, dash: '6 4', dots: true, label: 'axe jambe'},
+             {pts: pts('cassure'), color: 'var(--accent)', width: 3, dots: true, label: 'cassure'}]});
+}
+// tri par date, puis dans l'ordre d'enregistrement (départ, milieu, fin… filmés le même jour)
+const athVideos = id => db.videos.map((v, i) => [v, i]).filter(([v]) => v.athleteId === id).sort((a, b) => a[0].date.localeCompare(b[0].date) || (a[0].ts || a[1]) - (b[0].ts || b[1])).map(([v]) => v);
+function renderTrendForm(){
+  const sel = $('#gAth'), cur = sel.value || LS.get(KEY + '.vath') || (db.athletes[0] && db.athletes[0].id);
+  sel.innerHTML = db.athletes.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('') || '<option value="">— Ajoutez un athlète (onglet Équipe) —</option>';
+  if (cur && db.athletes.some(a => a.id === cur)) sel.value = cur;
+  if (!$('#gDate').value) $('#gDate').value = VS.date || today();
+  const list = athVideos(sel.value), S = VS.gait && VS.gait.summary;
+  $('#gTrend').innerHTML = (Number.isFinite(S && S.cassure) ? `<p class="small" style="margin:0 0 6px">Cette vidéo : cassure <b>${sgn(S.cassure)}</b> (tronc ${Math.round(S.trunkStance)}°, axe de la jambe ${Math.round(S.axis)}°).</p>` : '') +
+    (list.length ? `<p class="muted small" style="margin:0 0 4px">${list.length} analyse${list.length > 1 ? 's' : ''} enregistrée${list.length > 1 ? 's' : ''} pour cet athlète :</p>` + trendChart(list, 180)
+                 : '<p class="muted small" style="margin:0">Aucune analyse enregistrée pour cet athlète. Enregistrez celle-ci pour démarrer le suivi.</p>');
+}
+$('#gAth').addEventListener('change', () => { LS.set(KEY + '.vath', $('#gAth').value); renderTrendForm(); });
+$('#gSaveBtn').addEventListener('click', () => {
+  const G = VS.gait; if (!G) return;
+  const athleteId = $('#gAth').value; if (!athleteId){ toast('Ajoutez d\'abord un athlète'); return; }
+  const S = G.summary, fin = x => Number.isFinite(x) ? +x.toFixed(2) : null;
+  db.videos.push({id: uid(), ts: Date.now(), athleteId, date: $('#gDate').value || today(), label: $('#gLabel').value.trim(), file: VS.fileName || '',
+    cassure: fin(S.cassure), trunk: fin(S.trunkStance), axis: fin(S.axis), speed: fin(S.speed), freq: fin(S.freq), len: fin(S.len),
+    steps: G.stances ? G.stances.filter(s => s.align).length : 0, method: S.method});
+  save(); LS.set(KEY + '.vath', athleteId); renderTrendForm(); toast('Analyse enregistrée dans le suivi');
+});
+
 /* Export CSV (séparateur « ; » et virgule décimale pour Excel en français) */
 $('#gExport').addEventListener('click', () => {
   const G = VS.gait; if (!G) return;

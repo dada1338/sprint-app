@@ -4,7 +4,8 @@ Application web (un seul fichier `index.html`, aucune dépendance) pour mesurer,
 
 ## Onglets
 
-- **Équipe** : classement par vitesse max, 30 m projeté, tendance par athlète, fiche de progression, ajout d'athlètes, export/import JSON.
+- **Équipe** : classement par vitesse max, 30 m projeté, tendance par athlète, fiche de progression (dont le suivi des
+  analyses vidéo : cassure aux hanches, tronc et axe de la jambe séance après séance), ajout d'athlètes, export/import JSON.
 - **Chrono** : saisie des temps de passage (gabarits 20/30/60/100 m). Calcule la vitesse par segment et ajuste le modèle
   `v(t) = Vmax·(1 − e^(−t/τ))` : Vmax, τ, accélération initiale, distance à 95 % de Vmax.
 - **Modèle** :
@@ -18,6 +19,7 @@ Application web (un seul fichier `index.html`, aucune dépendance) pour mesurer,
   - angles en direct sur la vidéo (genoux, hanches, chevilles, tronc, coudes) et courbes des angles au fil du temps ;
   - alignement en milieu d'appui : inclinaison du tronc et de l'axe de la jambe d'appui (cheville → hanche), et
     « cassure aux hanches » = tronc − axe (0° = corps aligné depuis le pied, positive = tronc qui plonge en avant) ;
+  - suivi : chaque analyse peut être enregistrée pour un athlète (date, moment de la course) et comparée aux précédentes ;
   - cheville : dorsiflexion = 90° − angle tibia/pied (talon → pointe), positive pointe relevée, négative en flexion
     plantaire ; dorsiflexion maximale pendant chaque appui ;
   - appuis : temps de contact et de vol (ralenti ≥ 100 i/s et athlète assez grand à l'image), fréquence, longueur de pas,
