@@ -16,6 +16,8 @@ Application web (un seul fichier `index.html`, aucune dépendance) pour mesurer,
     est suivi dans une zone agrandie, recherchée à plusieurs échelles ;
   - nettoyage des trajectoires : correction des inversions gauche/droite, suppression des points aberrants, lissage ;
   - angles en direct sur la vidéo (genoux, hanches, chevilles, tronc, coudes) et courbes des angles au fil du temps ;
+  - alignement en milieu d'appui : inclinaison du tronc et de l'axe de la jambe d'appui (cheville → hanche), et
+    « cassure aux hanches » = tronc − axe (0° = corps aligné depuis le pied, positive = tronc qui plonge en avant) ;
   - cheville : dorsiflexion = 90° − angle tibia/pied (talon → pointe), positive pointe relevée, négative en flexion
     plantaire ; dorsiflexion maximale pendant chaque appui ;
   - appuis : temps de contact et de vol (ralenti ≥ 100 i/s et athlète assez grand à l'image), fréquence, longueur de pas,
