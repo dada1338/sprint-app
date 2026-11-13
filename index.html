@@ -953,6 +953,7 @@ $('#vFps').addEventListener('change', () => {
   updTime(); draw(); renderAnnos(); renderMarks();
 });
 $('#aiModel').addEventListener('change', () => { if (AI.pose){ AI.pose.setOptions({modelComplexity: +$('#aiModel').value}); setStatus('Précision modifiée : relancez l\'analyse pour l\'appliquer.'); } });
+$('#vSettings').addEventListener('toggle', () => draw());
 $('#vCalibBtn').addEventListener('click', () => { VS.calib = []; setTool('calib'); vid.pause(); $('#stage').scrollIntoView({behavior:'smooth', block:'center'}); });
 function renderRange(){ $('#vRangeTxt').textContent = VS.range ? `${fmt(VS.range[0])} → ${fmt(VS.range[1])} s` : 'toute la vidéo'; }
 $('#vRangeA').addEventListener('click', () => { const b = VS.range ? VS.range[1] : vid.duration; VS.range = [vid.currentTime, vid.currentTime < b ? b : vid.duration]; renderRange(); });
@@ -1176,19 +1177,29 @@ function ang3(a, b, c){
   return Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
 }
 const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+/* Cheville : dorsiflexion = 90° − angle entre le tibia (cheville → genou) et le pied (talon → pointe).
+   0° = pied à angle droit ; positif = pointe relevée vers le tibia (dorsiflexion) ; négatif = flexion plantaire. */
+function dorsi(knee, ankle, heel, toe){
+  const sh = [knee[0] - ankle[0], knee[1] - ankle[1]], ft = [toe[0] - heel[0], toe[1] - heel[1]];
+  const cos = (sh[0] * ft[0] + sh[1] * ft[1]) / ((Math.hypot(...sh) * Math.hypot(...ft)) || 1);
+  return 90 - Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI;
+}
+const sgn = x => Number.isFinite(x) ? (x > 0.5 ? '+' : '') + Math.round(x) + '°' : '–';
 function poseAngles(a){
   const g = i => lmPx(a, i), sh = mid(g(11), g(12)), hp = mid(g(23), g(24));
   return {
     kneeL: ang3(g(23), g(25), g(27)), kneeR: ang3(g(24), g(26), g(28)),
     hipL: ang3(g(11), g(23), g(25)), hipR: ang3(g(12), g(24), g(26)),
     trunk: Math.atan2(Math.abs(sh[0] - hp[0]), Math.abs(sh[1] - hp[1])) * 180 / Math.PI,
-    elbowL: ang3(g(11), g(13), g(15)), elbowR: ang3(g(12), g(14), g(16))
+    elbowL: ang3(g(11), g(13), g(15)), elbowR: ang3(g(12), g(14), g(16)),
+    ankleL: dorsi(g(25), g(27), g(29), g(31)), ankleR: dorsi(g(26), g(28), g(30), g(32))
   };
 }
 const SERIES = [
   {k:'kneeL', label:'Genou G', color:COL_L}, {k:'kneeR', label:'Genou D', color:COL_R},
   {k:'hipL', label:'Hanche G', color:COL_L, dash:'7 4'}, {k:'hipR', label:'Hanche D', color:COL_R, dash:'7 4'},
   {k:'trunk', label:'Tronc', color:'var(--accent)'},
+  {k:'ankleL', label:'Cheville G (dorsi.)', color:COL_L, dash:'12 4 2 4'}, {k:'ankleR', label:'Cheville D (dorsi.)', color:COL_R, dash:'12 4 2 4'},
   {k:'elbowL', label:'Coude G', color:COL_L, dash:'2 4'}, {k:'elbowR', label:'Coude D', color:COL_R, dash:'2 4'}
 ];
 /* mètres par pixel : taille de l'athlète (cuisse + jambe ≈ 49 % de la taille) ou 2 repères au sol */
@@ -1252,7 +1263,8 @@ function footprints(rows, dt, legMed){
   });
   const fine = 1 / dt >= 100, minPts = fine ? 3 : 2, minDur = fine ? 0.02 : 0.99 * dt;
   let prints = groups.filter(g => g.pts.length >= minPts && g.t1 - g.t0 >= minDur).map(g => ({
-    t0: g.t0, f0: Math.min(...g.pts.map(q => q.f)), x: g.xm, y: median(g.pts.map(q => q.y)),
+    t0: g.t0, f0: Math.min(...g.pts.map(q => q.f)), f1: Math.max(...g.pts.map(q => q.f)), x: g.xm, y: median(g.pts.map(q => q.y)),
+    si: g.pts.filter(q => q.side === 0).length * 2 >= g.pts.length ? 0 : 1,
     side: g.pts.filter(q => q.side === 0).length * 2 >= g.pts.length ? 'G' : 'D'})).sort((a, b) => a.t0 - b.t0);
   // on ne garde que les empreintes qui avancent dans le sens de la course
   const dir = Math.sign(slope(rows.map(r => r.t), rows.map(r => r.hipX))) || 1, kept = [];
@@ -1316,6 +1328,12 @@ function cleanFrames(src, dt){
   return out;
 }
 /* En course, les pieds alternent : on impose l'alternance G/D, dans le sens qui s'accorde avec le plus d'étiquettes du modèle */
+/* dorsiflexion maximale du pied au sol pendant l'appui (images f0 à f1, pied d'indice si) */
+function stanceDorsi(rows, si, f0, f1){
+  const v = rows.filter(r => r.f >= f0 && r.f <= f1).map(r => si ? r.ang.ankleR : r.ang.ankleL).filter(Number.isFinite);
+  v.sort((a, b) => b - a);
+  return v.length >= 3 ? v[1] : v.length ? v[0] : NaN;   // 2e plus forte valeur : une image bruitée ne fausse pas le maximum
+}
 function alternateSides(list, gaps){
   if (list.length < 2) return;
   let k = 0; const par = list.map((it, i) => (k += gaps ? gaps[i] || 0 : (i ? 1 : 0)) % 2);   // parité du pas (un « pas » double compte 2)
@@ -1358,7 +1376,7 @@ function computeGait(){
     const ys = rs.map(r => r.low.y).sort((a, b) => a - b), gy = ys[Math.min(ys.length - 1, Math.floor(ys.length * 0.6))];   // niveau robuste au bruit (le max est tiré par le bruit)
     const core = rs.filter(r => r.low.y >= gy - thr / 3);
     const f0 = core[0].f, f1 = core[core.length - 1].f;
-    return {f0, f1, side: nG * 2 >= rs.length ? 'G' : 'D', x: median(core.map(r => r.low.x)), y: median(core.map(r => r.low.y)),
+    return {f0, f1, si: nG * 2 >= rs.length ? 0 : 1, side: nG * 2 >= rs.length ? 'G' : 'D', x: median(core.map(r => r.low.x)), y: median(core.map(r => r.low.y)),
       tc: (f1 - f0 + 1) * dt, cutStart: rs[0].f <= first + 1, cutEnd: rs[rs.length - 1].f >= last - 1, td: core[0].ang, to: core[core.length - 1].ang};
   });
   alternateSides(contacts);
@@ -1420,7 +1438,7 @@ function computeGait(){
         rows.forEach((r, i) => {
           if (r.t < a.t0 + 0.3 * gap || r.t > a.t0 + 0.75 * gap) return;
           [0, 1].forEach(side => { const v = spd[side][i];
-            if (v != null && Math.abs(r.fx[side] - xm) < 0.3 * Math.abs(b.x - a.x) && (!best || v < best.v)) best = {v, t0: r.t, f0: r.f, x: r.fx[side], y: r.fy[side], side: side ? 'D' : 'G', recovered: true}; });
+            if (v != null && Math.abs(r.fx[side] - xm) < 0.3 * Math.abs(b.x - a.x) && (!best || v < best.v)) best = {v, t0: r.t, f0: r.f, f1: r.f, x: r.fx[side], y: r.fy[side], si: side, side: side ? 'D' : 'G', recovered: true}; });
         });
         if (best && best.v < 4) added.push(best);
       });
@@ -1462,21 +1480,24 @@ function renderGait(){
   $('#gSeries').innerHTML = SERIES.map(s => `<button class="chip" data-s="${s.k}" aria-pressed="${VS.series.has(s.k)}"><span class="dot" style="background:${s.color}"></span>${s.label}</button>`).join('');
   renderGaitChart();
   const kn = (c, a) => fmt(c.side === 'G' ? a.kneeL : a.kneeR, 0) + '°';
-  $('#gSteps').innerHTML = !G.reliable && G.printSteps && G.printSteps.length ? `<thead><tr><th>#</th><th>Pied</th><th class="r">Instant (s)</th><th class="r">Pas (m)</th><th class="r">Durée du pas (s)</th></tr></thead><tbody>` +
+  const dsp = it => sgn(stanceDorsi(G.rows, it.si, it.f0, it.f1));
+  $('#gSteps').innerHTML = !G.reliable && G.printSteps && G.printSteps.length ? `<thead><tr><th>#</th><th>Pied</th><th class="r">Instant (s)</th><th class="r">Pas (m)</th><th class="r hide-sm">Durée du pas (s)</th><th class="r">Dorsi. max</th></tr></thead><tbody>` +
       G.prints.map((p, i) => { const st = i ? G.printSteps[i - 1] : null; return `<tr class="click" data-f="${p.f0}"><td class="muted">${i + 1}</td>
         <td><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${p.side === 'G' ? COL_L : COL_R};margin-right:6px"></span>${p.side}</td>
-        <td class="r">${fmt(p.t0, 3)}</td><td class="r"><b>${st ? (st.doubt ? '(' + fmt(st.len, 2) + ')' : (p.recovered || st.from.recovered ? '≈ ' : '') + fmt(st.len, 2)) : (G.printSteps[0] && !G.printSteps[0].stepT ? 'départ' : '–')}</b></td><td class="r">${st && st.stepT ? fmt(st.stepT, 3) : '–'}</td></tr>`; }).join('') + '</tbody>'
-    : !G.reliable ? '<tbody><tr><td class="muted" style="white-space:normal">Appuis non mesurables de façon fiable sur cette vidéo (cadence d\'images trop faible ou détection irrégulière). Les moyennes ci-dessus restent valables.</td></tr></tbody>' : G.contacts.length ? `<thead><tr><th>#</th><th>Pied</th><th class="r">Instant (s)</th><th class="r">Contact (s)</th><th class="r">Vol (s)</th><th class="r">Pas (m)</th><th class="r hide-sm">Genou pose</th><th class="r hide-sm">Genou décoll.</th></tr></thead><tbody>` +
+        <td class="r">${fmt(p.t0, 3)}</td><td class="r"><b>${st ? (st.doubt ? '(' + fmt(st.len, 2) + ')' : (p.recovered || st.from.recovered ? '≈ ' : '') + fmt(st.len, 2)) : (G.printSteps[0] && !G.printSteps[0].stepT ? 'départ' : '–')}</b></td><td class="r hide-sm">${st && st.stepT ? fmt(st.stepT, 3) : '–'}</td><td class="r">${dsp(p)}</td></tr>`; }).join('') + '</tbody>'
+    : !G.reliable ? '<tbody><tr><td class="muted" style="white-space:normal">Appuis non mesurables de façon fiable sur cette vidéo (cadence d\'images trop faible ou détection irrégulière). Les moyennes ci-dessus restent valables.</td></tr></tbody>' : G.contacts.length ? `<thead><tr><th>#</th><th>Pied</th><th class="r">Instant (s)</th><th class="r">Contact (s)</th><th class="r">Vol (s)</th><th class="r">Pas (m)</th><th class="r">Dorsi. max</th><th class="r hide-sm">Genou pose</th><th class="r hide-sm">Genou décoll.</th></tr></thead><tbody>` +
     G.steps.map((s, i) => { const c = s.c; return `<tr class="click" data-f="${c.f0}">
       <td class="muted">${i + 1}</td><td><span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c.side === 'G' ? COL_L : COL_R};margin-right:6px"></span>${c.side}</td>
       <td class="r">${fmt(c.f0 * G.dt, 3)}</td><td class="r"><b>${c.cutStart || c.cutEnd ? '(' + fmt(c.tc, 3) + ')' : fmt(c.tc, 3)}</b></td>
       <td class="r">${s.flight != null ? fmt(s.flight, 3) : '–'}</td><td class="r"><b>${s.len ? fmt(s.len, 2) : '–'}</b></td>
-      <td class="r hide-sm">${kn(c, c.td)}</td><td class="r hide-sm">${kn(c, c.to)}</td></tr>`; }).join('') + '</tbody>'
+      <td class="r">${dsp(c)}</td><td class="r hide-sm">${kn(c, c.td)}</td><td class="r hide-sm">${kn(c, c.to)}</td></tr>`; }).join('') + '</tbody>'
     : '<tbody><tr><td class="muted">Aucun appui détecté. Ajustez la sensibilité dans les réglages ou analysez une plage où les pieds touchent le sol.</td></tr></tbody>';
   const notes = [];
   if (!G.pan && !G.scale) notes.push('Longueurs de pas : renseignez l\'étalonnage (taille de l\'athlète ou 2 repères au sol).');
   if (!G.pan && G.scale && $('#vCalib').value === 'height') notes.push('Étalonnage par la taille de l\'athlète : approximatif (±10 % ou plus selon la posture et le flou). Deux repères au sol à distance connue (plots, lignes) sont nettement plus fiables.');
   if (G.reliable && G.contacts.some(c => c.cutStart || c.cutEnd)) notes.push('Entre parenthèses : appui coupé par le début ou la fin de la plage analysée (exclu des moyennes).');
+  if (G.tooSmall) notes.push('Cheville : le pied fait peu de pixels à l\'image, les angles de cheville sont approximatifs.');
+  notes.push('Cheville : dorsiflexion = 90° − angle tibia/pied ; positif = pointe relevée vers le tibia, négatif = flexion plantaire.');
   if (G.fineTiming && G.tooSmall) notes.push(`L'athlète est trop petit à l'image (jambe ≈ ${fmt(G.legMed, 0)} px, il en faut au moins 60) : la pose et le décollage du pied ne se distinguent pas du bruit de détection. Rapprochez-vous ou zoomez pour mesurer les temps de contact.`);
   else if (G.fineTiming && !G.reliable) notes.push('Les appuis détectés sont incohérents (durées impossibles) : temps de contact et de vol masqués.');
   if (!G.fineTiming) notes.push(`À ${fmt(1 / G.dt, 0)} images/s réelles, un appui ne dure que 2 à 3 images : les temps de contact et de vol ne sont pas mesurables. Filmez en ralenti (120 ou 240 i/s) pour les obtenir.`);
@@ -1506,7 +1527,7 @@ function renderGaitChart(){
   let mn = 180, mx = 0;
   const series = sel.map(s => { const pts = smooth(G.rows.map(r => [r.t, r.ang[s.k]])); pts.forEach(p => { mn = Math.min(mn, p[1]); mx = Math.max(mx, p[1]); }); return {pts, color:s.color, width:2.2, dash:s.dash}; });
   if (!sel.length){ mn = 0; mx = 180; }
-  const yMin = Math.max(0, Math.floor((mn - 5) / 10) * 10), yMax = Math.max(yMin + 20, Math.min(180, Math.ceil((mx + 5) / 10) * 10));
+  const yMin = Math.max(-90, Math.min(0, Math.floor((mn - 5) / 10) * 10)), yMax = Math.max(yMin + 20, Math.min(180, Math.ceil((mx + 5) / 10) * 10));
   const x0 = G.rows[0].t - G.dt / 2, x1 = G.rows[G.rows.length - 1].t + G.dt / 2;
   const bands = (G.reliable ? G.contacts : []).map(c => ({x0: c.f0 * G.dt, x1: (c.f1 + 1) * G.dt, fill: c.side === 'G' ? 'rgba(34,167,224,.18)' : 'rgba(255,122,61,.18)'}));
   $('#gChart').innerHTML = chart({title:'Angles articulaires au fil du temps', xMin:x0, xMax:Math.max(x1, x0 + 0.05), yMin, yMax, xLabel:'temps réel (s)', yLabel:'angle (°)', right:12, series, bands, cursor:(frameAt(vid.currentTime) + 0.5) * G.dt});
@@ -1526,13 +1547,13 @@ $('#gExport').addEventListener('click', () => {
   const L = [], S = G.summary;
   L.push('Résumé'); L.push('Fréquence (pas/s);Longueur de pas (m);Vitesse (m/s);Temps de contact (s);Temps de vol (s);Méthode');
   L.push([n(S.freq, 2), n(S.len, 2), n(S.speed, 2), n(S.tc), n(S.flight), S.method].join(';')); L.push('');
-  if (G.reliable){ L.push('Appuis'); L.push('#;Pied;Instant (s);Contact (s);Vol (s);Pas (m);Genou pose (°);Genou décollage (°)');
-    G.steps.forEach((s, i) => { const c = s.c, k = a => c.side === 'G' ? a.kneeL : a.kneeR; L.push([i + 1, c.side, n(c.f0 * G.dt), n(c.tc), n(s.flight), n(s.len, 2), n(k(c.td), 0), n(k(c.to), 0)].join(';')); }); }
-  else if (G.prints && G.prints.length){ L.push('Pas (empreintes)'); L.push('#;Pied;Instant (s);Pas (m);Durée du pas (s);Douteux');
-    G.prints.forEach((p, i) => { const s = i ? G.printSteps[i - 1] : null; L.push([i + 1, p.side, n(p.t0), s ? n(s.len, 2) : (G.printSteps[0] && !G.printSteps[0].stepT ? 'départ' : ''), s ? n(s.stepT) : '', s && s.doubt ? 'oui' : (p.recovered ? 'empreinte estimée' : '')].join(';')); }); }
-  L.push(''); L.push('Images'); L.push('Temps réel (s);Genou G;Genou D;Hanche G;Hanche D;Tronc;Coude G;Coude D;Vitesse (m/s)');
+  if (G.reliable){ L.push('Appuis'); L.push('#;Pied;Instant (s);Contact (s);Vol (s);Pas (m);Genou pose (°);Genou décollage (°);Dorsiflexion max à l\'appui (°)');
+    G.steps.forEach((s, i) => { const c = s.c, k = a => c.side === 'G' ? a.kneeL : a.kneeR; L.push([i + 1, c.side, n(c.f0 * G.dt), n(c.tc), n(s.flight), n(s.len, 2), n(k(c.td), 0), n(k(c.to), 0), n(stanceDorsi(G.rows, c.si, c.f0, c.f1), 0)].join(';')); }); }
+  else if (G.prints && G.prints.length){ L.push('Pas (empreintes)'); L.push('#;Pied;Instant (s);Pas (m);Durée du pas (s);Douteux;Dorsiflexion max à l\'appui (°)');
+    G.prints.forEach((p, i) => { const s = i ? G.printSteps[i - 1] : null; L.push([i + 1, p.side, n(p.t0), s ? n(s.len, 2) : (G.printSteps[0] && !G.printSteps[0].stepT ? 'départ' : ''), s ? n(s.stepT) : '', s && s.doubt ? 'oui' : (p.recovered ? 'empreinte estimée' : ''), n(stanceDorsi(G.rows, p.si, p.f0, p.f1), 0)].join(';')); }); }
+  L.push(''); L.push('Images'); L.push('Temps réel (s);Genou G;Genou D;Hanche G;Hanche D;Tronc;Coude G;Coude D;Cheville G (dorsi.);Cheville D (dorsi.);Vitesse (m/s)');
   const sp = new Map((G.speedCurve || []).map(p => [p[0], p[1]]));
-  G.rows.forEach(r => { const a = r.ang; L.push([n(r.t), n(a.kneeL, 1), n(a.kneeR, 1), n(a.hipL, 1), n(a.hipR, 1), n(a.trunk, 1), n(a.elbowL, 1), n(a.elbowR, 1), n(sp.get(r.t), 2)].join(';')); });
+  G.rows.forEach(r => { const a = r.ang; L.push([n(r.t), n(a.kneeL, 1), n(a.kneeR, 1), n(a.hipL, 1), n(a.hipR, 1), n(a.trunk, 1), n(a.elbowL, 1), n(a.elbowR, 1), n(a.ankleL, 1), n(a.ankleR, 1), n(sp.get(r.t), 2)].join(';')); });
   const blob = new Blob(['\ufeff' + L.join('\r\n')], {type: 'text/csv;charset=utf-8'});
   const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = 'sprintlab-analyse-' + today() + '.csv'; el.click();
   setTimeout(() => URL.revokeObjectURL(el.href), 2000);
@@ -1590,8 +1611,10 @@ function drawAngles(a, r){
     pill(S(26)[0] + 12, S(26)[1], Math.round(A.kneeR) + '°', COL_R, 'left');
     pill(S(23)[0] - 12, S(23)[1] + 16, Math.round(A.hipL) + '°', COL_L, 'right', 12);
     pill(S(24)[0] + 12, S(24)[1] + 16, Math.round(A.hipR) + '°', COL_R, 'left', 12);
+    pill(S(27)[0] - 12, S(27)[1] - 12, sgn(A.ankleL), COL_L, 'right', 12);
+    pill(S(28)[0] + 12, S(28)[1] - 12, sgn(A.ankleR), COL_R, 'left', 12);
   }
-  return [[`G  genou ${Math.round(A.kneeL)}°  hanche ${Math.round(A.hipL)}°`, COL_L], [`D  genou ${Math.round(A.kneeR)}°  hanche ${Math.round(A.hipR)}°`, COL_R], [`Tronc ${Math.round(A.trunk)}°`, '#ffffff']];
+  return [[`G  genou ${Math.round(A.kneeL)}°  hanche ${Math.round(A.hipL)}°  cheville ${sgn(A.ankleL)}`, COL_L], [`D  genou ${Math.round(A.kneeR)}°  hanche ${Math.round(A.hipR)}°  cheville ${sgn(A.ankleR)}`, COL_R], [`Tronc ${Math.round(A.trunk)}°`, '#ffffff']];
 }
 /* encadré fixe en haut à droite : phase (appui / vol) + angles en direct */
 function drawHud(lines){
@@ -1636,7 +1659,8 @@ function drawCalib(r){
   ctx.strokeStyle = COL_CAL; ctx.fillStyle = COL_CAL; ctx.lineWidth = 2;
   if (P.length === 2){ ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]); ctx.lineTo(P[1][0], P[1][1]); ctx.stroke(); ctx.setLineDash([]); }
   P.forEach(p => { ctx.beginPath(); ctx.arc(p[0], p[1], 7, 0, 7); ctx.fill(); });
-  if (P.length === 2) pill((P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2 - 18, fmt(num($('#vCalibDist').value), 2) + ' m', COL_CAL, 'center', 13);
+  // distance des repères affichée seulement pendant le réglage (sinon confusion avec les longueurs de pas)
+  if (P.length === 2 && (VS.tool === 'calib' || $('#vSettings').open)) pill((P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2 - 18, fmt(num($('#vCalibDist').value), 2) + ' m', COL_CAL, 'center', 13);
 }
 function draw(){
   const dpr = window.devicePixelRatio || 1;

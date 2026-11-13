@@ -15,7 +15,9 @@ Application web (un seul fichier `index.html`, aucune dépendance) pour mesurer,
   - repérage automatique de l'athlète par le mouvement (caméra fixe), ou ciblage manuel ; un athlète petit ou loin
     est suivi dans une zone agrandie, recherchée à plusieurs échelles ;
   - nettoyage des trajectoires : correction des inversions gauche/droite, suppression des points aberrants, lissage ;
-  - angles en direct sur la vidéo (genoux, hanches, tronc, coudes) et courbes des angles au fil du temps ;
+  - angles en direct sur la vidéo (genoux, hanches, chevilles, tronc, coudes) et courbes des angles au fil du temps ;
+  - cheville : dorsiflexion = 90° − angle tibia/pied (talon → pointe), positive pointe relevée, négative en flexion
+    plantaire ; dorsiflexion maximale pendant chaque appui ;
   - appuis : temps de contact et de vol (ralenti ≥ 100 i/s et athlète assez grand à l'image), fréquence, longueur de pas,
     vitesse et courbe de vitesse au fil du temps ;
   - longueur de chaque pas par les « empreintes » (positions des pieds plantés), même quand les temps de contact ne sont
